@@ -1,0 +1,6 @@
+{
+  "program": "shadow_agent.aleo",
+  "version": "0.1.0",
+  "description": "Privacy-preserving AI agent marketplace with ZK reputation attestation",
+  "license": "MIT"
+}
