@@ -1,0 +1,26 @@
+{
+  "name": "shadowagent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ShadowAgent - Privacy-Preserving AI Agent Marketplace on Aleo",
+  "scripts": {
+    "build": "npm run build:sdk && npm run build:facilitator && npm run build:frontend",
+    "build:sdk": "cd shadow-sdk && npm run build",
+    "build:facilitator": "cd shadow-facilitator && npm run build",
+    "build:frontend": "cd shadow-frontend && npm run build",
+    "test": "npm run test:sdk && npm run test:facilitator",
+    "test:sdk": "cd shadow-sdk && npm test",
+    "test:facilitator": "cd shadow-facilitator && npm test",
+    "dev:facilitator": "cd shadow-facilitator && npm run dev",
+    "dev:frontend": "cd shadow-frontend && npm run dev",
+    "typecheck": "npm run typecheck:sdk && npm run typecheck:facilitator && npm run typecheck:frontend",
+    "typecheck:sdk": "cd shadow-sdk && npm run typecheck",
+    "typecheck:facilitator": "cd shadow-facilitator && npm run typecheck",
+    "typecheck:frontend": "cd shadow-frontend && npm run typecheck",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "author": "ShadowAgent Team",
+  "license": "MIT"
+}
