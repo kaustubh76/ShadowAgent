@@ -2,206 +2,160 @@
 
 ## Overview
 
-This guide covers building the demo UI for ShadowAgent using React and Tailwind CSS. The frontend provides two main views: Agent Dashboard and Client Discovery.
+The ShadowAgent frontend is a React single-page application providing two main views: **Agent Dashboard** (for AI service providers to register and manage their on-chain reputation) and **Client Discovery** (for consumers to search, hire, and pay agents). It integrates directly with the `shadow_agent.aleo` smart contract deployed on Aleo testnet via the `@provablehq/sdk` and the `@shadowagent/sdk`.
+
+**Live Contract:** `shadow_agent.aleo` on Aleo testnet
+**Deployment TX:** `at105knrkmfhsc8mlzd3sz5nmk2vy4jnsjdktdwq4fr236jcssasvpqp2sv9p`
 
 ---
 
 ## 1. Project Setup
 
-### 1.1 Create React App
+### 1.1 Technology Stack
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| React | 18.2 | UI framework |
+| TypeScript | 5.3.3 | Type safety |
+| Vite | 5.0.10 | Build tool (ESNext target for WASM) |
+| Tailwind CSS | 3.4.0 | Utility-first styling |
+| Zustand | 4.4.7 | State management |
+| React Router DOM | 6.21.1 | Client-side routing |
+| @provablehq/sdk | 0.9.15+ | Aleo blockchain SDK (WASM) |
+| @shadowagent/sdk | local | Project SDK for crypto/API helpers |
+| Lucide React | 0.303 | Icon library |
+| clsx | 2.0 | Conditional classnames |
+
+### 1.2 Installation
 
 ```bash
-# Using Vite (recommended)
-npm create vite@latest shadow-agent-ui -- --template react-ts
-cd shadow-agent-ui
+cd shadow-frontend
 
-# Install dependencies
+# Install dependencies (SDK is linked locally)
 npm install
-npm install @aleohq/sdk axios zustand
-npm install -D tailwindcss postcss autoprefixer
-npx tailwindcss init -p
+
+# Start development server
+npm run dev
+
+# Type check
+npm run typecheck
+
+# Production build
+npm run build
 ```
 
-### 1.2 Project Structure
+### 1.3 Project Structure
 
 ```
-shadow-agent-ui/
+shadow-frontend/
 ├── src/
-│   ├── main.tsx
-│   ├── App.tsx
+│   ├── main.tsx                    # Entry point (BrowserRouter + WalletProvider)
+│   ├── App.tsx                     # Routes, ErrorBoundary, NotFound page
+│   ├── index.css                   # Global styles, design system, animations
 │   ├── components/
-│   │   ├── layout/
-│   │   │   ├── Header.tsx
-│   │   │   ├── Sidebar.tsx
-│   │   │   └── Layout.tsx
-│   │   ├── agent/
-│   │   │   ├── AgentDashboard.tsx
-│   │   │   ├── ReputationCard.tsx
-│   │   │   ├── ProofGenerator.tsx
-│   │   │   └── EscrowManager.tsx
-│   │   ├── client/
-│   │   │   ├── ClientDashboard.tsx
-│   │   │   ├── AgentSearch.tsx
-│   │   │   ├── AgentCard.tsx
-│   │   │   └── PaymentFlow.tsx
-│   │   ├── common/
-│   │   │   ├── TierBadge.tsx
-│   │   │   ├── StarRating.tsx
-│   │   │   ├── TransactionLog.tsx
-│   │   │   └── ConnectWallet.tsx
-│   │   └── ui/
-│   │       ├── Button.tsx
-│   │       ├── Card.tsx
-│   │       ├── Input.tsx
-│   │       └── Select.tsx
+│   │   ├── Layout.tsx              # Shell: ambient background, header, footer
+│   │   ├── Header.tsx              # Glassmorphism nav with scroll awareness
+│   │   ├── AgentCard.tsx           # Agent listing card with shine effects
+│   │   ├── TierBadge.tsx           # Tier indicator (New/Bronze/Silver/Gold/Diamond)
+│   │   └── ConnectWallet.tsx       # Shield Wallet connect/balance/disconnect
+│   ├── pages/
+│   │   ├── HomePage.tsx            # Landing: hero, features, roadmap
+│   │   ├── AgentDashboard.tsx      # Register agent, view stats, generate proofs
+│   │   ├── ClientDashboard.tsx     # Search agents with filters
+│   │   └── AgentDetails.tsx        # Agent detail + hire modal + proof modal
+│   ├── providers/
+│   │   └── WalletProvider.tsx      # Shield Wallet context (ProgramManager)
+│   ├── contexts/
+│   │   └── ToastContext.tsx        # Toast notification system
+│   ├── stores/
+│   │   ├── agentStore.ts           # Agent/client state (Zustand)
+│   │   ├── walletStore.ts          # Wallet connection state
+│   │   └── sdkStore.ts             # SDK client state + health checks
 │   ├── hooks/
-│   │   ├── useAleo.ts
-│   │   ├── useAgent.ts
-│   │   ├── useClient.ts
-│   │   └── useTransactions.ts
-│   ├── store/
-│   │   ├── walletStore.ts
-│   │   ├── agentStore.ts
-│   │   └── clientStore.ts
+│   │   ├── useTransactions.ts      # Escrow creation, balance checks
+│   │   └── useCopyToClipboard.ts   # Clipboard utility hook
 │   ├── services/
-│   │   ├── api.ts
-│   │   └── aleo.ts
-│   ├── types/
-│   │   └── index.ts
-│   ├── utils/
-│   │   └── format.ts
-│   └── styles/
-│       └── globals.css
-├── public/
-├── index.html
-├── tailwind.config.js
-├── vite.config.ts
+│   │   └── aleo.ts                 # On-chain queries, tx builders, formatters
+│   ├── lib/
+│   │   └── api.ts                  # Facilitator API client (search, verify)
+│   └── constants/
+│       └── ui.ts                   # Timing, validation, external URLs
+├── tailwind.config.js              # Design tokens, animations, color system
+├── vite.config.ts                  # ESNext target, WASM config, API proxy
+├── postcss.config.js
+├── tsconfig.json
 └── package.json
 ```
 
-### 1.3 Tailwind Configuration
+### 1.4 Vite Configuration
 
-```javascript
-// tailwind.config.js
-/** @type {import('tailwindcss').Config} */
-export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {
-      colors: {
-        // ShadowAgent brand colors
-        shadow: {
-          50: '#f5f3ff',
-          100: '#ede9fe',
-          200: '#ddd6fe',
-          300: '#c4b5fd',
-          400: '#a78bfa',
-          500: '#8b5cf6',
-          600: '#7c3aed',
-          700: '#6d28d9',
-          800: '#5b21b6',
-          900: '#4c1d95',
-        },
+Key configuration for Aleo WASM compatibility:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: { '@': path.resolve(__dirname, './src') },
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',  // Facilitator backend
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
+    fs: {
+      allow: ['.', '../shadow-sdk', '../shadow-sdk/node_modules'],
+    },
   },
-  plugins: [],
-}
+  build: {
+    target: 'esnext',         // Required for top-level await (WASM)
+    sourcemap: true,
+  },
+  optimizeDeps: {
+    exclude: ['@provablehq/wasm'],  // Don't pre-bundle WASM
+  },
+});
 ```
 
-### 1.4 Global Styles
+### 1.5 Environment Variables
 
-```css
-/* src/styles/globals.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  body {
-    @apply bg-gray-900 text-white;
-  }
-}
-
-@layer components {
-  .card {
-    @apply bg-gray-800 rounded-lg border border-gray-700 p-6;
-  }
-
-  .btn-primary {
-    @apply bg-shadow-600 hover:bg-shadow-700 text-white font-medium py-2 px-4 rounded-lg transition-colors;
-  }
-
-  .btn-secondary {
-    @apply bg-gray-700 hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-lg transition-colors;
-  }
-
-  .input {
-    @apply bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-shadow-500;
-  }
-}
+```bash
+# .env
+VITE_API_URL=/api                          # Facilitator API (proxied in dev)
+VITE_ALEO_NETWORK=testnet
+VITE_SHIELD_WALLET_PRIVATE_KEY=APrivateKey1...  # Shield Wallet signing key
+VITE_SHIELD_WALLET_VIEW_KEY=AViewKey1...        # Record decryption key
 ```
 
 ---
 
-## 2. Types
+## 2. Routing
 
-```typescript
-// src/types/index.ts
+The app uses React Router v6 with a shared layout:
 
-export enum Tier {
-  New = 0,
-  Bronze = 1,
-  Silver = 2,
-  Gold = 3,
-  Diamond = 4,
-}
+```
+/           → HomePage       (landing page)
+/agent      → AgentDashboard (register, manage, prove)
+/client     → ClientDashboard (search agents)
+/agents/:id → AgentDetails   (detail view + hire)
+*           → NotFound       (404)
+```
 
-export enum ServiceType {
-  NLP = 1,
-  Vision = 2,
-  Code = 3,
-  Data = 4,
-  Audio = 5,
-  Multi = 6,
-  Custom = 7,
-}
-
-export interface AgentReputation {
-  owner: string;
-  agentId: string;
-  totalJobs: number;
-  totalRatingPoints: number;
-  totalRevenue: number;
-  tier: Tier;
-  createdAt: number;
-  lastUpdated: number;
-}
-
-export interface AgentListing {
-  agentId: string;
-  serviceType: ServiceType;
-  tier: Tier;
-  endpoint?: string;
-  isActive: boolean;
-}
-
-export interface Transaction {
-  id: string;
-  type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted' | 'reputation_updated';
-  timestamp: number;
-  details: string;
-  isPrivate: boolean;
-}
-
-export interface WalletState {
-  connected: boolean;
-  address: string | null;
-  balance: number;
-}
+```tsx
+// App.tsx - Route configuration
+<Routes>
+  <Route path="/" element={<Layout />}>
+    <Route index element={<HomePage />} />
+    <Route path="agent" element={<AgentDashboard />} />
+    <Route path="client" element={<ClientDashboard />} />
+    <Route path="agents/:agentId" element={<AgentDetails />} />
+    <Route path="*" element={<NotFound />} />
+  </Route>
+</Routes>
 ```
 
 ---
@@ -210,1021 +164,375 @@ export interface WalletState {
 
 ### 3.1 Wallet Store
 
-```typescript
-// src/store/walletStore.ts
-import { create } from 'zustand';
-import { WalletState } from '../types';
+Manages wallet connection, balance, and network state.
 
-interface WalletStore extends WalletState {
+```typescript
+// stores/walletStore.ts
+interface WalletState {
+  connected: boolean;
+  address: string | null;
+  balance: number;
+  network: 'testnet' | 'mainnet';
   connect: (address: string) => void;
   disconnect: () => void;
   setBalance: (balance: number) => void;
 }
-
-export const useWalletStore = create<WalletStore>((set) => ({
-  connected: false,
-  address: null,
-  balance: 0,
-
-  connect: (address) => set({
-    connected: true,
-    address,
-  }),
-
-  disconnect: () => set({
-    connected: false,
-    address: null,
-    balance: 0,
-  }),
-
-  setBalance: (balance) => set({ balance }),
-}));
 ```
 
 ### 3.2 Agent Store
 
+Unified store for both agent and client views. Types defined locally to avoid eager WASM loading from SDK imports.
+
 ```typescript
-// src/store/agentStore.ts
-import { create } from 'zustand';
-import { AgentReputation, Transaction, Tier } from '../types';
+// stores/agentStore.ts
+enum ServiceType { NLP=1, Vision=2, Code=3, Data=4, Audio=5, Multi=6, Custom=7 }
+enum Tier { New=0, Bronze=1, Silver=2, Gold=3, Diamond=4 }
 
-interface AgentStore {
-  reputation: AgentReputation | null;
-  transactions: Transaction[];
-  isRegistered: boolean;
-
-  setReputation: (rep: AgentReputation) => void;
-  addTransaction: (tx: Transaction) => void;
-  updateReputation: (jobRating: number, payment: number) => void;
+interface AgentListing {
+  agent_id: string;
+  service_type: ServiceType;
+  endpoint_hash: string;
+  tier: Tier;
+  is_active: boolean;
 }
 
-export const useAgentStore = create<AgentStore>((set, get) => ({
-  reputation: null,
-  transactions: [],
-  isRegistered: false,
+interface AgentState {
+  // Agent mode
+  isRegistered: boolean;
+  agentId: string | null;
+  reputation: { totalJobs; totalRatingPoints; totalRevenue; tier } | null;
 
-  setReputation: (reputation) => set({
-    reputation,
-    isRegistered: true,
-  }),
-
-  addTransaction: (tx) => set((state) => ({
-    transactions: [tx, ...state.transactions].slice(0, 50),
-  })),
-
-  updateReputation: (jobRating, payment) => set((state) => {
-    if (!state.reputation) return state;
-
-    const newJobs = state.reputation.totalJobs + 1;
-    const newPoints = state.reputation.totalRatingPoints + jobRating;
-    const newRevenue = state.reputation.totalRevenue + payment;
-
-    // Calculate tier
-    let tier = Tier.New;
-    if (newJobs >= 1000 && newRevenue >= 100000) tier = Tier.Diamond;
-    else if (newJobs >= 200 && newRevenue >= 10000) tier = Tier.Gold;
-    else if (newJobs >= 50 && newRevenue >= 1000) tier = Tier.Silver;
-    else if (newJobs >= 10 && newRevenue >= 100) tier = Tier.Bronze;
-
-    return {
-      reputation: {
-        ...state.reputation,
-        totalJobs: newJobs,
-        totalRatingPoints: newPoints,
-        totalRevenue: newRevenue,
-        tier,
-        lastUpdated: Date.now(),
-      },
-    };
-  }),
-}));
-```
-
-### 3.3 Client Store
-
-```typescript
-// src/store/clientStore.ts
-import { create } from 'zustand';
-import { AgentListing, Transaction, ServiceType, Tier } from '../types';
-
-interface ClientStore {
+  // Client mode
   searchResults: AgentListing[];
   selectedAgent: AgentListing | null;
-  transactions: Transaction[];
-  filters: {
-    serviceType: ServiceType | null;
-    minTier: Tier;
-  };
+  filters: SearchFilters;
+  isSearching: boolean;
 
-  setSearchResults: (results: AgentListing[]) => void;
-  selectAgent: (agent: AgentListing | null) => void;
-  setFilters: (filters: Partial<ClientStore['filters']>) => void;
-  addTransaction: (tx: Transaction) => void;
-}
-
-export const useClientStore = create<ClientStore>((set) => ({
-  searchResults: [],
-  selectedAgent: null,
-  transactions: [],
-  filters: {
-    serviceType: null,
-    minTier: Tier.New,
-  },
-
-  setSearchResults: (results) => set({ searchResults: results }),
-
-  selectAgent: (agent) => set({ selectedAgent: agent }),
-
-  setFilters: (filters) => set((state) => ({
-    filters: { ...state.filters, ...filters },
-  })),
-
-  addTransaction: (tx) => set((state) => ({
-    transactions: [tx, ...state.transactions].slice(0, 50),
-  })),
-}));
-```
-
----
-
-## 4. Common Components
-
-### 4.1 Tier Badge
-
-```tsx
-// src/components/common/TierBadge.tsx
-import { Tier } from '../../types';
-
-interface TierBadgeProps {
-  tier: Tier;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-const tierConfig = {
-  [Tier.New]: { label: 'New', color: 'bg-gray-500', icon: '○' },
-  [Tier.Bronze]: { label: 'Bronze', color: 'bg-amber-700', icon: '●' },
-  [Tier.Silver]: { label: 'Silver', color: 'bg-gray-300', icon: '●●' },
-  [Tier.Gold]: { label: 'Gold', color: 'bg-yellow-500', icon: '●●●' },
-  [Tier.Diamond]: { label: 'Diamond', color: 'bg-blue-400', icon: '◆' },
-};
-
-export function TierBadge({ tier, size = 'md' }: TierBadgeProps) {
-  const config = tierConfig[tier];
-
-  const sizeClasses = {
-    sm: 'text-xs px-2 py-0.5',
-    md: 'text-sm px-3 py-1',
-    lg: 'text-base px-4 py-2',
-  };
-
-  return (
-    <span className={`
-      inline-flex items-center gap-1 rounded-full font-medium
-      ${config.color} text-white ${sizeClasses[size]}
-    `}>
-      <span>{config.icon}</span>
-      <span>{config.label}</span>
-    </span>
-  );
+  // Transaction history (last 50)
+  transactions: Array<{ id; type; agentId; amount?; timestamp }>;
 }
 ```
 
-### 4.2 Star Rating
+### 3.3 SDK Store
 
-```tsx
-// src/components/common/StarRating.tsx
-import { useState } from 'react';
+Manages the `@shadowagent/sdk` client lifecycle and periodic health checks.
 
-interface StarRatingProps {
-  rating?: number;
-  onRate?: (rating: number) => void;
-  readonly?: boolean;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-export function StarRating({
-  rating = 0,
-  onRate,
-  readonly = false,
-  size = 'md',
-}: StarRatingProps) {
-  const [hovered, setHovered] = useState<number | null>(null);
-
-  const sizeClasses = {
-    sm: 'text-lg',
-    md: 'text-2xl',
-    lg: 'text-3xl',
-  };
-
-  const displayRating = hovered ?? rating;
-
-  return (
-    <div className={`flex gap-1 ${sizeClasses[size]}`}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          disabled={readonly}
-          className={`
-            transition-colors
-            ${readonly ? 'cursor-default' : 'cursor-pointer hover:scale-110'}
-            ${star <= displayRating ? 'text-yellow-400' : 'text-gray-600'}
-          `}
-          onClick={() => !readonly && onRate?.(star)}
-          onMouseEnter={() => !readonly && setHovered(star)}
-          onMouseLeave={() => !readonly && setHovered(null)}
-        >
-          ★
-        </button>
-      ))}
-    </div>
-  );
-}
-```
-
-### 4.3 Transaction Log
-
-```tsx
-// src/components/common/TransactionLog.tsx
-import { Transaction } from '../../types';
-
-interface TransactionLogProps {
-  transactions: Transaction[];
-}
-
-const typeLabels = {
-  escrow_created: 'Escrow Created',
-  escrow_claimed: 'Escrow Claimed',
-  rating_submitted: 'Rating Submitted',
-  reputation_updated: 'Reputation Updated',
-};
-
-export function TransactionLog({ transactions }: TransactionLogProps) {
-  return (
-    <div className="card">
-      <h3 className="text-lg font-semibold mb-4">Transaction Log</h3>
-
-      <div className="space-y-2 max-h-64 overflow-y-auto">
-        {transactions.length === 0 ? (
-          <p className="text-gray-400 text-center py-4">No transactions yet</p>
-        ) : (
-          transactions.map((tx) => (
-            <div
-              key={tx.id}
-              className="flex items-start gap-3 p-3 bg-gray-900 rounded-lg"
-            >
-              <div className="flex-shrink-0">
-                {tx.isPrivate ? (
-                  <span className="text-shadow-400">🔒</span>
-                ) : (
-                  <span className="text-green-400">📝</span>
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">
-                    {typeLabels[tx.type]}
-                  </span>
-                  {tx.isPrivate && (
-                    <span className="text-xs bg-shadow-600 px-2 py-0.5 rounded">
-                      PRIVATE
-                    </span>
-                  )}
-                </div>
-                <p className="text-gray-400 text-sm truncate">
-                  {tx.details}
-                </p>
-                <p className="text-gray-500 text-xs">
-                  {new Date(tx.timestamp).toLocaleTimeString()}
-                </p>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-```
-
-### 4.4 Connect Wallet Button
-
-```tsx
-// src/components/common/ConnectWallet.tsx
-import { useState } from 'react';
-import { useWalletStore } from '../../store/walletStore';
-
-export function ConnectWallet() {
-  const { connected, address, connect, disconnect } = useWalletStore();
-  const [isConnecting, setIsConnecting] = useState(false);
-
-  const handleConnect = async () => {
-    setIsConnecting(true);
-
-    try {
-      // In production, use Leo Wallet adapter
-      // For demo, generate mock address
-      const mockAddress = `aleo1${Math.random().toString(36).slice(2, 12)}...`;
-      connect(mockAddress);
-    } catch (error) {
-      console.error('Failed to connect wallet:', error);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  if (connected) {
-    return (
-      <div className="flex items-center gap-3">
-        <div className="text-sm">
-          <p className="text-gray-400">Connected</p>
-          <p className="font-mono text-shadow-400">{address}</p>
-        </div>
-        <button
-          onClick={disconnect}
-          className="btn-secondary text-sm"
-        >
-          Disconnect
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      onClick={handleConnect}
-      disabled={isConnecting}
-      className="btn-primary"
-    >
-      {isConnecting ? 'Connecting...' : 'Connect Wallet'}
-    </button>
-  );
+```typescript
+// stores/sdkStore.ts
+interface SDKState {
+  client: ShadowAgentClient | null;
+  isHealthy: boolean;
+  initializeClient: () => void;
+  checkHealth: () => Promise<void>;
 }
 ```
 
 ---
 
-## 5. Agent Dashboard Components
+## 4. Wallet Integration (Shield Wallet)
 
-### 5.1 Reputation Card
+The `WalletProvider` wraps the app and provides transaction signing via `@provablehq/sdk`.
 
-```tsx
-// src/components/agent/ReputationCard.tsx
-import { useAgentStore } from '../../store/agentStore';
-import { TierBadge } from '../common/TierBadge';
-import { StarRating } from '../common/StarRating';
+### 4.1 Architecture
 
-export function ReputationCard() {
-  const { reputation, isRegistered } = useAgentStore();
-
-  if (!isRegistered || !reputation) {
-    return (
-      <div className="card text-center py-8">
-        <p className="text-gray-400 mb-4">Not registered as an agent yet</p>
-        <button className="btn-primary">Register Agent</button>
-      </div>
-    );
-  }
-
-  const avgRating = reputation.totalJobs > 0
-    ? (reputation.totalRatingPoints / reputation.totalJobs / 10).toFixed(1)
-    : '0.0';
-
-  const formatRevenue = (cents: number) => {
-    return `$${(cents / 100).toLocaleString()}`;
-  };
-
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold">My Reputation</h3>
-        <TierBadge tier={reputation.tier} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-gray-900 rounded-lg p-4">
-          <p className="text-gray-400 text-sm mb-1">Total Jobs</p>
-          <p className="text-2xl font-bold">{reputation.totalJobs}</p>
-        </div>
-
-        <div className="bg-gray-900 rounded-lg p-4">
-          <p className="text-gray-400 text-sm mb-1">Revenue</p>
-          <p className="text-2xl font-bold">{formatRevenue(reputation.totalRevenue)}</p>
-        </div>
-
-        <div className="bg-gray-900 rounded-lg p-4 col-span-2">
-          <p className="text-gray-400 text-sm mb-2">Average Rating</p>
-          <div className="flex items-center gap-3">
-            <StarRating rating={parseFloat(avgRating)} readonly />
-            <span className="text-xl font-bold">{avgRating}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 pt-4 border-t border-gray-700">
-        <p className="text-xs text-gray-500">
-          Last updated: {new Date(reputation.lastUpdated).toLocaleString()}
-        </p>
-        <p className="text-xs text-shadow-400 mt-1">
-          This data is PRIVATE - only you can see these details
-        </p>
-      </div>
-    </div>
-  );
-}
+```
+main.tsx
+  └─ WalletProvider (context: connect, disconnect, signTransaction, getRecords)
+       └─ BrowserRouter
+            └─ App (routes)
 ```
 
-### 5.2 Proof Generator
+### 4.2 Key Implementation Details
 
-```tsx
-// src/components/agent/ProofGenerator.tsx
-import { useState } from 'react';
-import { useAgentStore } from '../../store/agentStore';
-import { Tier } from '../../types';
+**RPC URL:** The `@provablehq/sdk` classes (`AleoNetworkClient`, `ProgramManager`) internally append `/testnet` to the base URL. Pass only `https://api.explorer.provable.com/v1` — NOT `v1/testnet`.
 
-type ProofType = 'tier' | 'rating' | 'jobs' | 'revenue';
+**Transaction Signing:** Uses the `ExecuteOptions` object API:
 
-export function ProofGenerator() {
-  const { reputation } = useAgentStore();
-  const [proofType, setProofType] = useState<ProofType>('tier');
-  const [threshold, setThreshold] = useState('');
-  const [generatedProof, setGeneratedProof] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  const handleGenerate = async () => {
-    if (!reputation) return;
-
-    setIsGenerating(true);
-
-    try {
-      // Simulate proof generation
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      // Generate mock proof result
-      const proofLabels = {
-        tier: `Tier ≥ ${['New', 'Bronze', 'Silver', 'Gold', 'Diamond'][parseInt(threshold) || 0]}`,
-        rating: `Average rating ≥ ${threshold || '4.0'} stars`,
-        jobs: `Completed ≥ ${threshold || '10'} jobs`,
-        revenue: `Revenue in range specified`,
-      };
-
-      setGeneratedProof(`✓ Verified: ${proofLabels[proofType]}`);
-    } catch (error) {
-      console.error('Proof generation failed:', error);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  return (
-    <div className="card">
-      <h3 className="text-lg font-semibold mb-4">Generate Proof</h3>
-
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-2">
-            Proof Type
-          </label>
-          <select
-            value={proofType}
-            onChange={(e) => setProofType(e.target.value as ProofType)}
-            className="input w-full"
-          >
-            <option value="tier">Tier Proof</option>
-            <option value="rating">Rating Proof</option>
-            <option value="jobs">Jobs Count Proof</option>
-            <option value="revenue">Revenue Range Proof</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-2">
-            {proofType === 'tier' ? 'Minimum Tier' :
-             proofType === 'rating' ? 'Minimum Rating' :
-             proofType === 'jobs' ? 'Minimum Jobs' :
-             'Revenue Range'}
-          </label>
-
-          {proofType === 'tier' ? (
-            <select
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              className="input w-full"
-            >
-              <option value="0">New (0)</option>
-              <option value="1">Bronze (1)</option>
-              <option value="2">Silver (2)</option>
-              <option value="3">Gold (3)</option>
-              <option value="4">Diamond (4)</option>
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              placeholder={
-                proofType === 'rating' ? '4.0' :
-                proofType === 'jobs' ? '10' :
-                '$1,000 - $10,000'
-              }
-              className="input w-full"
-            />
-          )}
-        </div>
-
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating || !reputation}
-          className="btn-primary w-full"
-        >
-          {isGenerating ? 'Generating...' : 'Generate Proof'}
-        </button>
-
-        {generatedProof && (
-          <div className="bg-green-900/20 border border-green-500 rounded-lg p-4">
-            <p className="text-green-400 font-medium">{generatedProof}</p>
-            <button className="text-sm text-green-300 hover:text-green-200 mt-2">
-              Copy Proof
-            </button>
-          </div>
-        )}
-      </div>
-
-      <p className="text-xs text-gray-500 mt-4">
-        Proofs are ZK attestations - they verify thresholds without revealing
-        your actual data.
-      </p>
-    </div>
-  );
-}
+```typescript
+const txResult = await programManager.execute({
+  programName: programId,    // e.g. 'shadow_agent.aleo'
+  functionName,              // e.g. 'register_agent'
+  inputs,                    // string[] of Leo-formatted values
+  priorityFee: fee,
+  privateFee: false,         // Use public balance for fees
+});
 ```
 
-### 5.3 Agent Dashboard
+**Balance Fetching:** Uses direct RPC fetch (not SDK) since it's a simple mapping lookup:
 
-```tsx
-// src/components/agent/AgentDashboard.tsx
-import { ReputationCard } from './ReputationCard';
-import { ProofGenerator } from './ProofGenerator';
-import { TransactionLog } from '../common/TransactionLog';
-import { useAgentStore } from '../../store/agentStore';
-
-export function AgentDashboard() {
-  const { transactions } = useAgentStore();
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Agent Dashboard</h2>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        <ReputationCard />
-        <ProofGenerator />
-      </div>
-
-      <TransactionLog transactions={transactions} />
-    </div>
-  );
-}
-```
-
----
-
-## 6. Client Dashboard Components
-
-### 6.1 Agent Card
-
-```tsx
-// src/components/client/AgentCard.tsx
-import { AgentListing, ServiceType } from '../../types';
-import { TierBadge } from '../common/TierBadge';
-
-interface AgentCardProps {
-  agent: AgentListing;
-  onSelect: () => void;
-}
-
-const serviceTypeLabels = {
-  [ServiceType.NLP]: 'NLP',
-  [ServiceType.Vision]: 'Vision',
-  [ServiceType.Code]: 'Code',
-  [ServiceType.Data]: 'Data',
-  [ServiceType.Audio]: 'Audio',
-  [ServiceType.Multi]: 'Multi-modal',
-  [ServiceType.Custom]: 'Custom',
-};
-
-export function AgentCard({ agent, onSelect }: AgentCardProps) {
-  return (
-    <div className="card hover:border-shadow-500 transition-colors cursor-pointer"
-         onClick={onSelect}>
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <p className="font-mono text-sm text-gray-400">
-            {agent.agentId.slice(0, 8)}...{agent.agentId.slice(-8)}
-          </p>
-          <span className="inline-block mt-1 text-xs bg-gray-700 px-2 py-0.5 rounded">
-            {serviceTypeLabels[agent.serviceType]}
-          </span>
-        </div>
-        <TierBadge tier={agent.tier} size="sm" />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <span className={`text-sm ${agent.isActive ? 'text-green-400' : 'text-gray-400'}`}>
-          {agent.isActive ? '● Active' : '○ Inactive'}
-        </span>
-        <button className="btn-primary text-sm">
-          Hire Agent
-        </button>
-      </div>
-
-      <p className="text-xs text-shadow-400 mt-3">
-        Tier verified via ZK proof - details private
-      </p>
-    </div>
-  );
-}
-```
-
-### 6.2 Agent Search
-
-```tsx
-// src/components/client/AgentSearch.tsx
-import { useState } from 'react';
-import { useClientStore } from '../../store/clientStore';
-import { ServiceType, Tier } from '../../types';
-
-export function AgentSearch() {
-  const { filters, setFilters, setSearchResults } = useClientStore();
-  const [isSearching, setIsSearching] = useState(false);
-
-  const handleSearch = async () => {
-    setIsSearching(true);
-
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      // Mock results
-      const mockResults = [
-        {
-          agentId: 'aleo1abc123def456...',
-          serviceType: filters.serviceType || ServiceType.NLP,
-          tier: Tier.Silver,
-          isActive: true,
-        },
-        {
-          agentId: 'aleo1xyz789uvw012...',
-          serviceType: filters.serviceType || ServiceType.NLP,
-          tier: Tier.Gold,
-          isActive: true,
-        },
-        {
-          agentId: 'aleo1qrs456tuv789...',
-          serviceType: filters.serviceType || ServiceType.Code,
-          tier: Tier.Bronze,
-          isActive: false,
-        },
-      ].filter(a => a.tier >= filters.minTier);
-
-      setSearchResults(mockResults);
-    } catch (error) {
-      console.error('Search failed:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  return (
-    <div className="card">
-      <h3 className="text-lg font-semibold mb-4">Search Agents</h3>
-
-      <div className="grid md:grid-cols-3 gap-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-2">
-            Service Type
-          </label>
-          <select
-            value={filters.serviceType || ''}
-            onChange={(e) => setFilters({
-              serviceType: e.target.value ? parseInt(e.target.value) : null,
-            })}
-            className="input w-full"
-          >
-            <option value="">All Types</option>
-            <option value="1">NLP</option>
-            <option value="2">Vision</option>
-            <option value="3">Code</option>
-            <option value="4">Data</option>
-            <option value="5">Audio</option>
-            <option value="6">Multi-modal</option>
-            <option value="7">Custom</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-2">
-            Minimum Tier
-          </label>
-          <div className="flex gap-1">
-            {[0, 1, 2, 3, 4].map((tier) => (
-              <button
-                key={tier}
-                onClick={() => setFilters({ minTier: tier })}
-                className={`
-                  flex-1 py-2 rounded text-sm font-medium transition-colors
-                  ${filters.minTier === tier
-                    ? 'bg-shadow-600 text-white'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}
-                `}
-              >
-                {['○', '●', '●●', '●●●', '◆'][tier]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-end">
-          <button
-            onClick={handleSearch}
-            disabled={isSearching}
-            className="btn-primary w-full"
-          >
-            {isSearching ? 'Searching...' : 'Search'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-```
-
-### 6.3 Client Dashboard
-
-```tsx
-// src/components/client/ClientDashboard.tsx
-import { AgentSearch } from './AgentSearch';
-import { AgentCard } from './AgentCard';
-import { TransactionLog } from '../common/TransactionLog';
-import { useClientStore } from '../../store/clientStore';
-
-export function ClientDashboard() {
-  const { searchResults, transactions, selectAgent } = useClientStore();
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Find Agents</h2>
-
-      <AgentSearch />
-
-      {searchResults.length > 0 && (
-        <div>
-          <h3 className="text-lg font-semibold mb-4">
-            Results ({searchResults.length})
-          </h3>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {searchResults.map((agent) => (
-              <AgentCard
-                key={agent.agentId}
-                agent={agent}
-                onSelect={() => selectAgent(agent)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <TransactionLog transactions={transactions} />
-    </div>
-  );
-}
-```
-
----
-
-## 7. Layout Components
-
-### 7.1 Header
-
-```tsx
-// src/components/layout/Header.tsx
-import { ConnectWallet } from '../common/ConnectWallet';
-
-export function Header() {
-  return (
-    <header className="bg-gray-800 border-b border-gray-700">
-      <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🔐</span>
-          <h1 className="text-xl font-bold">
-            Shadow<span className="text-shadow-400">Agent</span>
-          </h1>
-        </div>
-
-        <ConnectWallet />
-      </div>
-    </header>
-  );
-}
-```
-
-### 7.2 Sidebar
-
-```tsx
-// src/components/layout/Sidebar.tsx
-interface SidebarProps {
-  activeView: 'agent' | 'client';
-  onViewChange: (view: 'agent' | 'client') => void;
-}
-
-export function Sidebar({ activeView, onViewChange }: SidebarProps) {
-  return (
-    <aside className="w-64 bg-gray-800 border-r border-gray-700 min-h-screen p-4">
-      <nav className="space-y-2">
-        <button
-          onClick={() => onViewChange('agent')}
-          className={`
-            w-full text-left px-4 py-3 rounded-lg transition-colors
-            ${activeView === 'agent'
-              ? 'bg-shadow-600 text-white'
-              : 'text-gray-400 hover:bg-gray-700'}
-          `}
-        >
-          <span className="mr-3">🤖</span>
-          Agent View
-        </button>
-
-        <button
-          onClick={() => onViewChange('client')}
-          className={`
-            w-full text-left px-4 py-3 rounded-lg transition-colors
-            ${activeView === 'client'
-              ? 'bg-shadow-600 text-white'
-              : 'text-gray-400 hover:bg-gray-700'}
-          `}
-        >
-          <span className="mr-3">👤</span>
-          Client View
-        </button>
-      </nav>
-
-      <div className="mt-8 p-4 bg-gray-900 rounded-lg">
-        <h4 className="font-medium mb-2">Privacy Mode</h4>
-        <p className="text-xs text-gray-400">
-          All transaction details are private.
-          Only verified tier badges are public.
-        </p>
-      </div>
-    </aside>
-  );
-}
-```
-
-### 7.3 Layout
-
-```tsx
-// src/components/layout/Layout.tsx
-import { ReactNode } from 'react';
-import { Header } from './Header';
-import { Sidebar } from './Sidebar';
-
-interface LayoutProps {
-  children: ReactNode;
-  activeView: 'agent' | 'client';
-  onViewChange: (view: 'agent' | 'client') => void;
-}
-
-export function Layout({ children, activeView, onViewChange }: LayoutProps) {
-  return (
-    <div className="min-h-screen bg-gray-900">
-      <Header />
-
-      <div className="flex">
-        <Sidebar activeView={activeView} onViewChange={onViewChange} />
-
-        <main className="flex-1 p-6">
-          {children}
-        </main>
-      </div>
-    </div>
-  );
-}
-```
-
----
-
-## 8. Main App
-
-```tsx
-// src/App.tsx
-import { useState } from 'react';
-import { Layout } from './components/layout/Layout';
-import { AgentDashboard } from './components/agent/AgentDashboard';
-import { ClientDashboard } from './components/client/ClientDashboard';
-import './styles/globals.css';
-
-function App() {
-  const [activeView, setActiveView] = useState<'agent' | 'client'>('agent');
-
-  return (
-    <Layout activeView={activeView} onViewChange={setActiveView}>
-      {activeView === 'agent' ? (
-        <AgentDashboard />
-      ) : (
-        <ClientDashboard />
-      )}
-    </Layout>
-  );
-}
-
-export default App;
-```
-
----
-
-## 9. Entry Point
-
-```tsx
-// src/main.tsx
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+```typescript
+const response = await fetch(
+  `https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/${publicKey}`
 );
+const match = balanceText.match(/(\d+)u64/);
 ```
 
 ---
 
-## 10. Build and Run
+## 5. On-Chain Integration
+
+### 5.1 Contract Constants
+
+```typescript
+// services/aleo.ts
+export const SHADOW_AGENT_PROGRAM_ID = 'shadow_agent.aleo';
+export const ALEO_RPC_URL = 'https://api.explorer.provable.com/v1';
+export const REGISTRATION_BOND = 10_000_000;   // 10 credits
+export const RATING_BURN_COST = 500_000;       // 0.5 credits
+```
+
+### 5.2 On-Chain Queries
+
+Three mapping queries against the deployed contract:
+
+```typescript
+// Check if address is registered
+GET /v1/testnet/program/shadow_agent.aleo/mapping/registered_agents/{address}
+→ "true" | 404
+
+// Get agent listing
+GET /v1/testnet/program/shadow_agent.aleo/mapping/agent_listings/{agent_id}field
+→ PublicListing struct
+
+// Check nullifier (Sybil resistance)
+GET /v1/testnet/program/shadow_agent.aleo/mapping/used_nullifiers/{nullifier}field
+→ "true" | 404
+```
+
+### 5.3 Transaction Builders
+
+Leo-formatted inputs for each transition:
+
+```typescript
+// register_agent(service_type: u8, endpoint_hash: field, bond_amount: u64)
+buildRegisterAgentInputs(serviceType, endpointUrl, bondAmount)
+→ { service_type, endpoint_hash, bond_amount }
+
+// submit_rating(agent: address, job_hash: field, rating: u8, payment: u64, burn: u64)
+buildSubmitRatingInputs(agentId, rating, paymentAmount, nullifierSeed)
+
+// create_escrow(agent: address, amount: u64, job_hash: field, secret_hash: field, deadline: u64)
+buildCreateEscrowInputs(agentAddress, amount, jobData, deadlineBlocks, secret)
+```
+
+### 5.4 Input Formatters
+
+```typescript
+formatU8ForLeo(1)       → "1u8"
+formatU64ForLeo(10000)  → "10000u64"
+formatFieldForLeo("42") → "42field"
+```
+
+---
+
+## 6. Design System
+
+### 6.1 Color Tokens
+
+```javascript
+// tailwind.config.js
+colors: {
+  shadow: { 50..950 },      // Brand purple palette
+  surface: {
+    0: '#0a0a0f',            // Deepest background
+    1: '#12121a',            // Card backgrounds
+    2: '#1a1a25',            // Elevated surfaces
+    3: '#222230',            // Interactive surfaces
+    4: '#2a2a3a',            // Highlighted surfaces
+  },
+}
+```
+
+### 6.2 Key CSS Classes
+
+| Class | Description |
+|-------|-------------|
+| `.card` | Surface-1 background, border, rounded-xl, padding |
+| `.card-shine` | Hover sweep gradient effect |
+| `.glass` | Backdrop-blur glassmorphism |
+| `.btn-primary` | Shadow-600 gradient button |
+| `.btn-outline` | Ghost button with border |
+| `.input` | Dark input with inset shadow |
+| `.mesh-bg` | Ambient radial gradient background |
+| `.grid-pattern` | Subtle grid overlay |
+| `.noise-overlay` | Film grain texture |
+| `.tier-*` | Tier-specific badge colors |
+| `.service-*` | Service type icon backgrounds |
+
+### 6.3 Animations
+
+20+ custom animations defined in Tailwind config:
+
+- `fade-in`, `fade-in-up`, `fade-in-down` — Entry transitions
+- `scale-in` — Scale from 0.95 to 1
+- `slide-in-right` — Toast notifications
+- `float` — Gentle floating (hero orbs)
+- `pulse-soft` — Status indicators
+- `glow-pulse` — Diamond tier badge
+- `shine` — Card hover sweep
+- `gradient-shift` — Background animation
+
+---
+
+## 7. Component Architecture
+
+### 7.1 Layout Shell
+
+```
+Layout.tsx
+├── mesh-bg (ambient background layer)
+├── grid-pattern (subtle grid overlay)
+├── noise-overlay (film grain texture)
+├── divider-glow (gradient line below header)
+├── Header.tsx
+│   ├── Logo (glow on hover)
+│   ├── Navigation pills (Home, Find Agents, Agent Panel)
+│   ├── Active route indicator (underline bar)
+│   ├── ConnectWallet.tsx
+│   └── Mobile menu (hamburger + staggered items)
+├── <Outlet /> (page content with route-key animation)
+└── Footer (mini logo + tagline)
+```
+
+### 7.2 Page Components
+
+**HomePage** — Hero with floating gradient orbs, stats bar (ZK Proofs, Privacy, Protocol, Network), feature grid with card-shine, tier system table, how-it-works steps, roadmap with status badges, CTA section.
+
+**ClientDashboard** — Filter panel (service type, minimum tier, status), search button, result grid with staggered entry animations, skeleton loading cards, empty state with clear-filters action.
+
+**AgentDashboard** — Two modes:
+- *Not connected:* Connect wallet prompt with gradient icon
+- *Connected:* Registration form OR dashboard stats (4 gradient stat cards), ZK proof generation section, unregister option
+
+**AgentDetails** — Back link, header card (name + tier + status), details grid (service info + privacy checks), hire action card with numbered steps, two modals: ReputationProofModal (verify ZK proof) and RequestServiceModal (create escrow payment).
+
+### 7.3 Shared Components
+
+**AgentCard** — Gradient hover overlay, card-shine sweep, service icon with scale transition, tier badge, active/offline status with ping animation, arrow micro-interaction.
+
+**TierBadge** — Icon per tier (Star, Award, Trophy, Gem), tier-specific CSS classes with gradient backgrounds, Gold glow shadow, Diamond pulse animation, three sizes (sm/md/lg).
+
+**ConnectWallet** — Two states:
+- *Disconnected:* Primary button with Wallet icon
+- *Connected:* Balance display (ALEO), glass address chip with emerald pulse dot, copy button, explorer link, disconnect button
+
+**ToastContext** — 4 types (success/error/info/warning), icon container with type-specific background, backdrop-blur-xl, auto-dismiss after 5 seconds, slide-in-right animation.
+
+---
+
+## 8. API Integration
+
+### 8.1 Facilitator API Client
+
+```typescript
+// lib/api.ts - Uses SDK client when available, falls back to direct fetch
+searchAgents(filters, limit, offset) → { agents, total, limit, offset }
+getAgent(agentId)                    → AgentListing | null
+verifyReputationProof(proof)         → { valid, tier?, error? }
+verifyEscrowProof(proof)             → { valid, error? }
+getHealth()                          → { status, blockHeight? }
+```
+
+### 8.2 SDK Store Health Checks
+
+On app load, `sdkStore.initializeClient()` creates the SDK client. A 30-second interval runs `checkHealth()` to monitor facilitator availability.
+
+---
+
+## 9. Transaction Flows
+
+### 9.1 Agent Registration
+
+```
+User fills form (service type, endpoint URL, bond amount)
+  → buildRegisterAgentInputs() formats Leo inputs
+  → signTransaction('shadow_agent.aleo', 'register_agent', inputs, fee)
+  → ProgramManager.execute() builds & broadcasts tx
+  → Poll for confirmation (up to 60 seconds)
+  → Update agentStore.setRegistered(true, agentId)
+```
+
+### 9.2 Escrow Payment (x402 Flow)
+
+```
+Client clicks "Request Service" on AgentDetails
+  → Enters payment amount
+  → createEscrow(agent_id, microcredits, description)
+  → signTransaction('shadow_agent.aleo', 'create_escrow', inputs, fee)
+  → EscrowRecord created (status: Locked)
+  → Agent delivers service, reveals secret
+  → claim_escrow releases payment
+```
+
+### 9.3 Rating Submission
+
+```
+Client submits rating (1-5 stars)
+  → Burns 0.5 credits (RATING_BURN_COST)
+  → Nullifier generated from client hash + job hash
+  → signTransaction('shadow_agent.aleo', 'submit_rating', inputs, fee)
+  → RatingRecord created, nullifier stored (prevents double-rating)
+```
+
+---
+
+## 10. Deployment Status
+
+### 10.1 Smart Contract
+
+| Field | Value |
+|-------|-------|
+| Program | `shadow_agent.aleo` |
+| Network | Aleo Testnet |
+| Deploy TX | `at105knrkmfhsc8mlzd3sz5nmk2vy4jnsjdktdwq4fr236jcssasvpqp2sv9p` |
+| Constructor | `@noupgrade` (immutable) |
+
+### 10.2 Verified Transitions
+
+| Transition | TX ID | Status |
+|-----------|-------|--------|
+| `register_agent` | `at1hr25c...qzgp` | Confirmed |
+| `create_escrow` | `at197amq...efpp` | Confirmed |
+| `submit_rating` | `at1qv5p2...agqv` | Confirmed |
+
+### 10.3 On-Chain State
+
+| Mapping | Verified |
+|---------|----------|
+| `registered_agents` | Agent registration check |
+| `agent_listings` | Public listing query |
+| `used_nullifiers` | Sybil resistance (double-rating prevention) |
+
+---
+
+## 11. Build and Run
 
 ```bash
-# Development
+# Development (with hot reload)
 npm run dev
 
-# Build for production
+# Type check
+npm run typecheck
+
+# Production build
 npm run build
 
 # Preview production build
 npm run preview
+
+# Lint
+npm run lint
+npm run lint:fix
 ```
 
----
+### Production Build Output
 
-## 11. Demo Data Setup
-
-For the hackathon demo, add this to initialize mock data:
-
-```typescript
-// src/utils/mockData.ts
-import { useAgentStore } from '../store/agentStore';
-import { Tier, Transaction } from '../types';
-
-export function initializeMockData() {
-  const agentStore = useAgentStore.getState();
-
-  // Set mock reputation
-  agentStore.setReputation({
-    owner: 'aleo1shadow...demo',
-    agentId: '123456789',
-    totalJobs: 47,
-    totalRatingPoints: 2162, // ~4.6 avg
-    totalRevenue: 4700, // $47.00
-    tier: Tier.Silver,
-    createdAt: Date.now() - 86400000 * 30, // 30 days ago
-    lastUpdated: Date.now(),
-  });
-
-  // Add mock transactions
-  const mockTransactions: Transaction[] = [
-    {
-      id: '1',
-      type: 'reputation_updated',
-      timestamp: Date.now() - 300000,
-      details: '47→48 jobs, tier unchanged',
-      isPrivate: true,
-    },
-    {
-      id: '2',
-      type: 'rating_submitted',
-      timestamp: Date.now() - 600000,
-      details: 'Burned 0.5 credits',
-      isPrivate: true,
-    },
-    {
-      id: '3',
-      type: 'escrow_claimed',
-      timestamp: Date.now() - 900000,
-      details: 'Amount hidden',
-      isPrivate: true,
-    },
-  ];
-
-  mockTransactions.forEach(tx => agentStore.addTransaction(tx));
-}
+```
+dist/index.html                    0.87 kB
+dist/assets/aleo_wasm-*.wasm      19,084 kB  (Aleo WASM module)
+dist/assets/index-*.css               43 kB  (gzip: 8 kB)
+dist/assets/index-*.js               265 kB  (gzip: 78 kB)
+dist/assets/browser-*.js             194 kB  (gzip: 37 kB)
 ```
 
 ---
