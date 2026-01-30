@@ -162,7 +162,7 @@ leo build
 
 # Test Registration
 echo "Testing registration..."
-leo run register_agent 1u8 123field 456field && echo "✓ REG-01 passed"
+leo run register_agent 1u8 123field 10000000u64 && echo "✓ REG-01 passed"
 
 # Test Rating (valid)
 echo "Testing valid rating..."
@@ -222,6 +222,8 @@ module.exports = {
   },
 };
 ```
+
+> **Coverage Exceptions (MVP):** The following components are stubbed in the MVP and may not meet the 80% threshold: proof verification in `aleo.service.ts` (returns placeholder `true`), event indexer in `indexer.service.ts` (uses in-memory cache). These are documented as planned for Phase 10a (Foundation Hardening). See [02_Facilitator_Implementation.md](02_Facilitator_Implementation.md) for details.
 
 ### 2.3 Test Files
 

@@ -328,6 +328,8 @@ transition create_escrow_multi(
 
 ### 3.2.2 Session-Based Payments (Critical Priority)
 
+> **Implementation Status:** The core session-based payment system (`create_session`, `session_request`, `settle_session`, `close_session`, `pause_session`, `resume_session`) is **already implemented** in the MVP smart contract -- see [01_Smart_Contract_Implementation.md](01_Smart_Contract_Implementation.md) Section 9 and [Phase 5 of the 10-Phase Plan](00_Project_Overview_10_Phase_Plan.md). This section describes **production-scale enhancements** including multi-token sessions, tiered authorization, and optimized batch settlement.
+
 **Problem Statement:** The x402 micropayment model has a fundamental UX issue at scale: 1000 API calls = 1000 wallet signatures. This makes high-frequency AI agent interactions impractical for real-world usage.
 
 **Solution:** Session-based payments - "Sign once, spend within bounds" - enabling true autonomous agent economies.

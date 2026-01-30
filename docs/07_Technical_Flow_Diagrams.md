@@ -15,6 +15,7 @@ This document provides detailed technical flow diagrams for each component of th
 5. [Testing Flows](#5-testing-flows)
 6. [Future Roadmap Flows](#6-future-roadmap-flows)
 7. [Cross-Component Data Flow](#7-cross-component-data-flow)
+8. [Session-Based Payment Flow](#8-session-based-payment-flow)
 
 ---
 
@@ -1202,6 +1203,116 @@ Solves the micropayment UX problem:
 - Before: 1000 API calls = 1000 wallet signatures
 - After: 1 signature = unlimited requests within bounds
 - Enables autonomous AI agent economies
+
+---
+
+## 8. SESSION-BASED PAYMENT FLOW
+
+> Corresponds to **Phase 5** in the [10-Phase Master Plan](00_Project_Overview_10_Phase_Plan.md).
+
+### 8.1 Session Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    SESSION-BASED PAYMENT LIFECYCLE                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  CLIENT (Human/AI)              SESSION                    AGENT                │
+│  ─────────────────              ───────                    ─────                │
+│                                                                                 │
+│  1. CREATE SESSION                                                              │
+│  ┌─────────────────┐                                                            │
+│  │ Sign once:      │                                                            │
+│  │ max_total: $100 │──── create_session() ──────►  Session ACTIVE              │
+│  │ per_req: $1     │     (locks funds)                  │                       │
+│  │ rate: 100/hr    │                                    │                       │
+│  │ expires: 1 day  │                                    │                       │
+│  └─────────────────┘                                    │                       │
+│                                                         │                       │
+│  2. USE SESSION (no signatures!)                        │                       │
+│  ┌─────────────────┐                                    │                       │
+│  │ Request 1: $0.05│──── session_request() ────►  Validate bounds             │
+│  │ Request 2: $0.05│──── session_request() ────►  amount <= per_req? ✓         │
+│  │ Request 3: $0.05│──── session_request() ────►  spent+amt <= max? ✓          │
+│  │ ...             │                                rate_limit ok? ✓            │
+│  │ Request N: $0.05│──── session_request() ────►  not expired? ✓               │
+│  └─────────────────┘                              Returns SessionReceipt       │
+│                                                         │                       │
+│  3. SETTLE (batch)                                      │                       │
+│                                         ┌───────────────┘                       │
+│                                         │                                       │
+│                                         ▼                                       │
+│                              settle_session()                                   │
+│                              (batch up to 100 receipts                          │
+│                               into 1 on-chain TX)                               │
+│                                         │                                       │
+│                                         ▼                                       │
+│  4. CLOSE                         Funds transferred                             │
+│  ┌─────────────────┐             to agent on-chain                              │
+│  │ close_session() │                    │                                       │
+│  │ Refund unused:  │◄──────────────────┘                                       │
+│  │ $100 - spent    │                                                            │
+│  └─────────────────┘                                                            │
+│                                                                                 │
+│  OPTIONAL CONTROLS:                                                             │
+│  ├── pause_session()  ──►  Temporarily freeze (no new requests)                │
+│  └── resume_session() ──►  Reactivate paused session                           │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Session vs x402 Comparison
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    x402 (PER-REQUEST)            SESSION-BASED                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  For 1000 API calls:                                                            │
+│                                                                                 │
+│  x402 Flow:                          Session Flow:                              │
+│  ──────────                          ─────────────                              │
+│  Request  1 → Sign → Escrow → Claim  create_session → Sign ONCE               │
+│  Request  2 → Sign → Escrow → Claim  Request  1 → No sig → Receipt            │
+│  Request  3 → Sign → Escrow → Claim  Request  2 → No sig → Receipt            │
+│  ...                                 ...                                        │
+│  Request 1000→ Sign → Escrow → Claim Request 1000 → No sig → Receipt           │
+│                                      settle_session → 1 TX                      │
+│                                      close_session → Refund                     │
+│                                                                                 │
+│  Signatures:    1000                 Signatures:     1                           │
+│  On-chain TXs:  1000                On-chain TXs:   2-3                         │
+│  Gas cost:      1000x               Gas cost:       ~3x                         │
+│  Latency:       Per-request          Latency:        None (off-chain)           │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 8.3 Session State Machine
+
+```
+                    ┌──────────────┐
+                    │              │
+    create_session  │   ACTIVE     │  session_request (N times)
+    ───────────────►│   (status=0) │◄─────────────────────────
+                    │              │
+                    └──────┬───────┘
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+              ▼            ▼            ▼
+     ┌──────────────┐  ┌────────┐  ┌──────────────┐
+     │   PAUSED     │  │ SETTLE │  │   CLOSED     │
+     │   (status=1) │  │ (batch)│  │   (status=2) │
+     │              │  │        │  │              │
+     │ pause_session│  │ settle │  │ close_session│
+     └──────┬───────┘  │_session│  │ + refund     │
+            │          └────┬───┘  └──────────────┘
+            │               │
+            ▼               ▼
+     resume_session    Funds → Agent
+     ──► ACTIVE        on-chain
+```
 
 ---
 

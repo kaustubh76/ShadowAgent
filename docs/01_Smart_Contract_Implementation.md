@@ -697,6 +697,8 @@ leo run register_agent 1u8 123field 10000000u64
 
 ## 9. Phase 7: Session-Based Payments
 
+> **10-Phase Plan Mapping:** This section corresponds to **Phase 5 (Session-Based Payments)** in the [10-Phase Master Plan](00_Project_Overview_10_Phase_Plan.md). The "Phase 7" label here refers to the internal smart contract implementation order, not the project-level phase numbering.
+
 Session-based payments solve the micropayment UX problem: "1000 API calls = 1000 wallet signatures" becomes "1 signature, unlimited requests within bounds."
 
 ### 9.1 Session Records

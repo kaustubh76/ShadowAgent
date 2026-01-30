@@ -333,8 +333,10 @@ export const TIER_THRESHOLDS = {
 // Default escrow timeout
 export const DEFAULT_ESCROW_BLOCKS = 100;
 
-// Rating scale
-export const RATING_SCALE = 10;  // Multiply stars by 10
+// Rating scale: On-chain uses 1-50 (integer). UI uses 1-5 stars.
+// SDK auto-converts: stars * RATING_SCALE = on-chain value.
+// Example: 4 stars * 10 = 40 on-chain. Average: total_rating_points / total_jobs.
+export const RATING_SCALE = 10;
 ```
 
 ---

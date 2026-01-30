@@ -341,6 +341,9 @@ export class AleoService {
   }
 
   // Verify escrow proof
+  // MVP NOTE: This is a placeholder implementation that performs basic field
+  // validation only. Full ZK proof verification using the Aleo SDK is planned
+  // for the Foundation Hardening phase (Phase 10a). See 06_Future_Implementation_Plan.md.
   async verifyEscrowProof(
     proof: EscrowProof,
     expectedAgent: string,
@@ -363,7 +366,7 @@ export class AleoService {
         hasProof: !!proof.proof,
       });
 
-      return true; // Placeholder
+      return true; // MVP STUB: Returns true if fields are present. Production will verify ZK proof.
     } catch (error) {
       logger.error('Escrow proof verification failed', { error });
       return false;
@@ -382,6 +385,7 @@ export class AleoService {
       }
 
       // TODO: Implement actual proof verification
+      // MVP STUB: Returns valid if proof_type matches. Production will verify ZK proof.
 
       return {
         valid: true,
@@ -460,6 +464,10 @@ export class IndexerService {
       // For hackathon: scan known agent IDs
       // For production: use event subscription or full mapping scan
 
+      // MVP NOTE: Uses in-memory cache (agentCache Map) for agent directory.
+      // Config references DATABASE_URL but the MVP does not use a persistent database.
+      // Production will use PostgreSQL + Redis (see 06_Future_Implementation_Plan.md Phase 10a).
+      //
       // This is a simplified approach - in production you'd:
       // 1. Subscribe to new transactions on shadow_agent.aleo
       // 2. Parse register_agent events to get new agent_ids
