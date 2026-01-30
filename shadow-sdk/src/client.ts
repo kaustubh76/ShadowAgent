@@ -300,7 +300,7 @@ export class ShadowAgentClient {
     if (this.config.privateKey) {
       try {
         // Check balance first
-        const senderAddress = getAddress(this.config.privateKey);
+        const senderAddress = await getAddress(this.config.privateKey);
         const balance = await getBalance(senderAddress);
         const fee = 10_000; // 0.01 credits fee
         const totalNeeded = paymentTerms.price + fee;
@@ -377,7 +377,7 @@ export class ShadowAgentClient {
     if (this.config.privateKey) {
       try {
         // Check balance for burn cost
-        const senderAddress = getAddress(this.config.privateKey);
+        const senderAddress = await getAddress(this.config.privateKey);
         const balance = await getBalance(senderAddress);
         const fee = 10_000; // 0.01 credits fee
         const totalNeeded = RATING_BURN_COST + fee;
