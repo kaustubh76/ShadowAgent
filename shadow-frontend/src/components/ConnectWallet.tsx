@@ -1,15 +1,14 @@
-// Real Leo Wallet Connection Component
+// Shield Wallet Connection Component
 
 import { useState, useEffect, useCallback } from 'react';
-import { Wallet, LogOut, Copy, Check, ExternalLink } from 'lucide-react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { WalletMultiButton } from '@demox-labs/aleo-wallet-adapter-reactui';
+import { LogOut, Copy, Check, ExternalLink, Loader2, Wallet } from 'lucide-react';
+import { useShieldWallet } from '../providers/WalletProvider';
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { ALEO_EXPLORER_URL } from '../constants/ui';
 import { useToast } from '../contexts/ToastContext';
 
 export default function ConnectWallet() {
-  const { publicKey, connected, disconnect, requestRecords } = useWallet();
+  const { publicKey, connected, connecting, connect, disconnect } = useShieldWallet();
   const { copied, copy } = useCopyToClipboard();
   const toast = useToast();
   const [balance, setBalance] = useState<number>(0);
@@ -27,38 +26,31 @@ export default function ConnectWallet() {
     return (microcredits / 1_000_000).toFixed(2);
   };
 
-  // Fetch balance from records
+  // Fetch balance from RPC
   const fetchBalance = useCallback(async () => {
-    if (!connected || !publicKey || !requestRecords) return;
+    if (!connected || !publicKey) return;
 
     setIsLoadingBalance(true);
     try {
-      // Request credits.aleo records to get balance
-      const records = await requestRecords('credits.aleo');
+      const rpcUrl = 'https://api.explorer.provable.com/v1/testnet';
+      const response = await fetch(
+        `${rpcUrl}/program/credits.aleo/mapping/account/${publicKey}`
+      );
 
-      // Sum up unspent credits from records
-      const totalBalance = records.reduce((sum, record) => {
-        // Parse microcredits from record data
-        const microcredits = record.data?.microcredits;
-        if (microcredits) {
-          // Remove 'u64' suffix and parse
-          const amount = parseInt(microcredits.replace('u64', ''), 10);
-          return sum + (isNaN(amount) ? 0 : amount);
-        }
-        return sum;
-      }, 0);
-
-      setBalance(totalBalance);
+      if (response.ok) {
+        const balanceText = await response.text();
+        const match = balanceText.match(/(\d+)u64/);
+        const microcredits = match ? parseInt(match[1], 10) : 0;
+        setBalance(microcredits);
+      }
     } catch (error) {
-      // Silently fail for balance fetching - just use cached balance
-      // Only log in development mode
       if (import.meta.env.DEV) {
         console.error('Failed to fetch balance:', error);
       }
     } finally {
       setIsLoadingBalance(false);
     }
-  }, [connected, publicKey, requestRecords]);
+  }, [connected, publicKey]);
 
   // Fetch balance when wallet connects
   useEffect(() => {
@@ -76,6 +68,18 @@ export default function ConnectWallet() {
     }
   };
 
+  // Handle connect
+  const handleConnect = async () => {
+    try {
+      await connect();
+    } catch (error) {
+      toast.error('Failed to connect Shield Wallet');
+      if (import.meta.env.DEV) {
+        console.error('Failed to connect:', error);
+      }
+    }
+  };
+
   // Handle disconnect
   const handleDisconnect = async () => {
     try {
@@ -89,42 +93,59 @@ export default function ConnectWallet() {
     }
   };
 
-  // If not connected, show the wallet multi-button (handles connection modal)
+  // If not connected, show connect button
   if (!connected) {
     return (
-      <WalletMultiButton className="btn btn-primary flex items-center gap-2">
-        <Wallet className="w-4 h-4" />
-        Connect Wallet
-      </WalletMultiButton>
+      <button
+        onClick={handleConnect}
+        disabled={connecting}
+        className="btn btn-primary flex items-center gap-2"
+      >
+        {connecting ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Connecting...
+          </>
+        ) : (
+          <>
+            <Wallet className="w-4 h-4" />
+            Connect Wallet
+          </>
+        )}
+      </button>
     );
   }
 
   // Connected state
   return (
-    <div className="flex items-center gap-3 animate-fade-in">
+    <div className="flex items-center gap-2.5 animate-fade-in">
       {/* Balance */}
       <div className="hidden sm:block text-right">
-        <div className={`text-sm font-medium text-white ${!isLoadingBalance ? 'animate-fade-in' : ''}`}>
-          {isLoadingBalance ? '...' : formatBalance(balance)} ALEO
+        <div className={`text-sm font-semibold text-white ${!isLoadingBalance ? 'animate-fade-in' : ''}`}>
+          {isLoadingBalance ? '...' : formatBalance(balance)} <span className="text-gray-400 font-normal text-xs">ALEO</span>
         </div>
-        <div className="text-xs text-gray-400">Testnet</div>
+        <div className="text-[10px] text-gray-500 uppercase tracking-wider">Testnet</div>
       </div>
 
-      {/* Address */}
-      <div className="flex items-center gap-2 glass px-3 py-2">
+      {/* Divider */}
+      <div className="hidden sm:block w-px h-8 bg-white/[0.06]" />
+
+      {/* Address chip */}
+      <div className="flex items-center gap-1.5 glass px-3 py-2">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-soft" />
         <span className="text-sm font-mono text-gray-300">
           {formatAddress(publicKey)}
         </span>
         <button
           onClick={handleCopyAddress}
-          className="text-gray-400 hover:text-white transition-all duration-200"
+          className="text-gray-500 hover:text-white transition-all duration-300 p-1 rounded-md hover:bg-white/[0.04]"
           aria-label={copied ? "Address copied" : "Copy address to clipboard"}
           title="Copy address"
         >
           {copied ? (
-            <Check className="w-4 h-4 text-green-400 animate-scale-in" />
+            <Check className="w-3.5 h-3.5 text-emerald-400 animate-scale-in" />
           ) : (
-            <Copy className="w-4 h-4" />
+            <Copy className="w-3.5 h-3.5" />
           )}
         </button>
         {copied && (
@@ -138,7 +159,7 @@ export default function ConnectWallet() {
           href={`${ALEO_EXPLORER_URL}/address/${publicKey}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-gray-400 hover:text-shadow-400 transition-all duration-200 hover:scale-110 p-2"
+          className="text-gray-500 hover:text-shadow-400 transition-all duration-300 p-2 rounded-lg hover:bg-white/[0.04]"
           title="View on Explorer"
         >
           <ExternalLink className="w-4 h-4" />
@@ -148,10 +169,10 @@ export default function ConnectWallet() {
       {/* Disconnect */}
       <button
         onClick={handleDisconnect}
-        className="text-gray-400 hover:text-red-400 transition-all duration-200 hover:scale-110 p-2"
+        className="text-gray-500 hover:text-red-400 transition-all duration-300 p-2 rounded-lg hover:bg-red-500/[0.06]"
         title="Disconnect wallet"
       >
-        <LogOut className="w-5 h-5" />
+        <LogOut className="w-4 h-4" />
       </button>
     </div>
   );

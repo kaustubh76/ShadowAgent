@@ -1,89 +1,155 @@
-// Aleo Multi-Wallet Provider using aleo-adapters
-// Supports: Leo, Puzzle, Fox, Soter wallets
+// Shield Wallet Provider - Direct key-based Aleo wallet integration
+// Uses @provablehq/sdk for address derivation and transaction signing
 
-import { FC, ReactNode, useMemo, useCallback, useEffect } from 'react';
-import {
-  WalletProvider as AleoWalletProvider,
-  useWallet,
-} from '@demox-labs/aleo-wallet-adapter-react';
-import { WalletModalProvider } from '@demox-labs/aleo-wallet-adapter-reactui';
-import {
-  LeoWalletAdapter,
-  PuzzleWalletAdapter,
-  FoxWalletAdapter,
-  SoterWalletAdapter,
-} from 'aleo-adapters';
-import {
-  DecryptPermission,
-  WalletAdapterNetwork,
-} from '@demox-labs/aleo-wallet-adapter-base';
+import { FC, ReactNode, useEffect, useState, createContext, useContext, useCallback, useMemo } from 'react';
 import { useWalletStore } from '../stores/walletStore';
 
-// Import wallet adapter styles
-import '@demox-labs/aleo-wallet-adapter-reactui/styles.css';
+// Shield Wallet context types
+interface ShieldWalletContextType {
+  publicKey: string | null;
+  connected: boolean;
+  connecting: boolean;
+  viewKey: string | null;
+  connect: () => Promise<void>;
+  disconnect: () => Promise<void>;
+  signTransaction: (programId: string, functionName: string, inputs: string[], fee: number) => Promise<string>;
+  getRecords: (programId: string) => Promise<any[]>;
+}
+
+const ShieldWalletContext = createContext<ShieldWalletContextType>({
+  publicKey: null,
+  connected: false,
+  connecting: false,
+  viewKey: null,
+  connect: async () => {},
+  disconnect: async () => {},
+  signTransaction: async () => '',
+  getRecords: async () => [],
+});
+
+export const useShieldWallet = () => useContext(ShieldWalletContext);
 
 interface WalletProviderProps {
   children: ReactNode;
 }
 
-// Inner component to sync wallet state with our store
-const WalletStateSync: FC<{ children: ReactNode }> = ({ children }) => {
-  const { publicKey, connected } = useWallet();
-  const { connect, disconnect } = useWalletStore();
-
-  useEffect(() => {
-    if (connected && publicKey) {
-      connect(publicKey);
-    } else {
-      disconnect();
-    }
-  }, [connected, publicKey, connect, disconnect]);
-
-  return <>{children}</>;
-};
-
 export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
-  // Configure all supported Aleo wallets
-  const wallets = useMemo(
-    () => [
-      new LeoWalletAdapter({
-        appName: 'ShadowAgent',
-      }),
-      new PuzzleWalletAdapter({
-        appName: 'ShadowAgent',
-        programIdPermissions: {
-          [WalletAdapterNetwork.TestnetBeta]: ['credits.aleo'],
-        },
-      }),
-      new FoxWalletAdapter({
-        appName: 'ShadowAgent',
-      }),
-      new SoterWalletAdapter({
-        appName: 'ShadowAgent',
-      }),
-    ],
-    []
-  );
+  const [publicKey, setPublicKey] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const { connect: storeConnect, disconnect: storeDisconnect } = useWalletStore();
 
-  // Handle wallet errors
-  const onError = useCallback((error: Error) => {
-    if (import.meta.env.DEV) {
-      console.error('Wallet error:', error);
+  const privateKey = import.meta.env.VITE_SHIELD_WALLET_PRIVATE_KEY;
+  const viewKey = import.meta.env.VITE_SHIELD_WALLET_VIEW_KEY || null;
+
+  // Derive address from private key on mount
+  const connect = useCallback(async () => {
+    if (!privateKey) {
+      console.error('Shield Wallet: No private key configured. Set VITE_SHIELD_WALLET_PRIVATE_KEY in .env');
+      return;
     }
-  }, []);
+
+    setConnecting(true);
+    try {
+      const { Account } = await import('@provablehq/sdk');
+      const account = new Account({ privateKey });
+      const address = account.address().to_string();
+
+      setPublicKey(address);
+      setConnected(true);
+      storeConnect(address);
+    } catch (error) {
+      console.error('Shield Wallet: Failed to derive address:', error);
+    } finally {
+      setConnecting(false);
+    }
+  }, [privateKey, storeConnect]);
+
+  const disconnect = useCallback(async () => {
+    setPublicKey(null);
+    setConnected(false);
+    storeDisconnect();
+  }, [storeDisconnect]);
+
+  // Sign and submit a transaction using the SDK directly
+  const signTransaction = useCallback(async (
+    programId: string,
+    functionName: string,
+    inputs: string[],
+    fee: number
+  ): Promise<string> => {
+    if (!privateKey) throw new Error('Shield Wallet: No private key configured');
+
+    const {
+      Account,
+      ProgramManager,
+      AleoNetworkClient,
+      AleoKeyProvider,
+      NetworkRecordProvider,
+    } = await import('@provablehq/sdk');
+
+    const account = new Account({ privateKey });
+    // Base URL without /testnet — the SDK appends the network path internally
+    const rpcUrl = 'https://api.explorer.provable.com/v1';
+
+    const networkClient = new AleoNetworkClient(rpcUrl);
+    const keyProvider = new AleoKeyProvider();
+    keyProvider.useCache(true);
+    const recordProvider = new NetworkRecordProvider(account, networkClient);
+
+    const programManager = new ProgramManager(rpcUrl, keyProvider, recordProvider);
+    programManager.setAccount(account);
+
+    const txResult = await programManager.execute({
+      programName: programId,
+      functionName,
+      inputs,
+      priorityFee: fee,
+      privateFee: false,
+    });
+
+    return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
+  }, [privateKey]);
+
+  // Fetch records for a program via RPC
+  const getRecords = useCallback(async (programId: string): Promise<any[]> => {
+    if (!publicKey) return [];
+
+    try {
+      const rpcUrl = 'https://api.explorer.provable.com/v1/testnet';
+      const response = await fetch(
+        `${rpcUrl}/program/${programId}/mapping/account/${publicKey}`
+      );
+      if (!response.ok) return [];
+      const data = await response.text();
+      return data ? [{ data, owner: publicKey }] : [];
+    } catch {
+      return [];
+    }
+  }, [publicKey]);
+
+  // Auto-connect on mount if private key is available
+  useEffect(() => {
+    if (privateKey && !connected && !connecting) {
+      connect();
+    }
+  }, [privateKey, connected, connecting, connect]);
+
+  const contextValue = useMemo(() => ({
+    publicKey,
+    connected,
+    connecting,
+    viewKey,
+    connect,
+    disconnect,
+    signTransaction,
+    getRecords,
+  }), [publicKey, connected, connecting, viewKey, connect, disconnect, signTransaction, getRecords]);
 
   return (
-    <AleoWalletProvider
-      wallets={wallets}
-      decryptPermission={DecryptPermission.UponRequest}
-      network={WalletAdapterNetwork.TestnetBeta}
-      autoConnect={true}
-      onError={onError}
-    >
-      <WalletModalProvider>
-        <WalletStateSync>{children}</WalletStateSync>
-      </WalletModalProvider>
-    </AleoWalletProvider>
+    <ShieldWalletContext.Provider value={contextValue}>
+      {children}
+    </ShieldWalletContext.Provider>
   );
 };
 
