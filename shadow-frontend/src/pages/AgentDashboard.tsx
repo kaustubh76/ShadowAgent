@@ -26,8 +26,9 @@ import {
 } from '../services/aleo';
 import { getTierName, getServiceTypeName } from '../stores/agentStore';
 
-// Facilitator API URL
+// Facilitator API URL — only used when VITE_FACILITATOR_URL is explicitly configured
 const FACILITATOR_URL = import.meta.env.VITE_FACILITATOR_URL || 'http://localhost:3001';
+const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
 
 interface AgentReputation {
   totalJobs: number;
@@ -128,20 +129,31 @@ export default function AgentDashboard() {
       setIsRegistered(registered);
 
       if (registered) {
-        // Try facilitator first, fall back to on-chain defaults
-        try {
-          const response = await fetch(`${FACILITATOR_URL}/agents/by-address/${publicKey}`);
-          if (response.ok) {
-            const data = await response.json();
-            setAgentId(data.agent_id);
-            setReputation({
-              totalJobs: data.total_jobs || 0,
-              totalRatingPoints: data.total_rating_points || 0,
-              totalRevenue: data.total_revenue || 0,
-              tier: data.tier || Tier.New,
-            });
-          } else {
-            // Facilitator unavailable — use on-chain registration with defaults
+        if (FACILITATOR_ENABLED) {
+          // Try facilitator first, fall back to on-chain defaults
+          try {
+            const response = await fetch(`${FACILITATOR_URL}/agents/by-address/${publicKey}`);
+            if (response.ok) {
+              const data = await response.json();
+              setAgentId(data.agent_id);
+              setReputation({
+                totalJobs: data.total_jobs || 0,
+                totalRatingPoints: data.total_rating_points || 0,
+                totalRevenue: data.total_revenue || 0,
+                tier: data.tier || Tier.New,
+              });
+            } else {
+              // Facilitator unavailable — use on-chain registration with defaults
+              setAgentId(publicKey.slice(0, 16) + '...');
+              setReputation({
+                totalJobs: 0,
+                totalRatingPoints: 0,
+                totalRevenue: 0,
+                tier: Tier.New,
+              });
+            }
+          } catch {
+            // Facilitator not running — use on-chain registration with defaults
             setAgentId(publicKey.slice(0, 16) + '...');
             setReputation({
               totalJobs: 0,
@@ -150,8 +162,8 @@ export default function AgentDashboard() {
               tier: Tier.New,
             });
           }
-        } catch {
-          // Facilitator not running — use on-chain registration with defaults
+        } else {
+          // No facilitator configured — use on-chain registration with defaults
           setAgentId(publicKey.slice(0, 16) + '...');
           setReputation({
             totalJobs: 0,
@@ -273,17 +285,19 @@ export default function AgentDashboard() {
         });
 
         // Notify facilitator (non-blocking — registration works without it)
-        fetch(`${FACILITATOR_URL}/agents/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            address: publicKey,
-            service_type: selectedServiceType,
-            endpoint_url: endpointUrl,
-            bond_amount: bondAmount,
-            tx_id: txId,
-          }),
-        }).catch(() => {});
+        if (FACILITATOR_ENABLED) {
+          fetch(`${FACILITATOR_URL}/agents/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              address: publicKey,
+              service_type: selectedServiceType,
+              endpoint_url: endpointUrl,
+              bond_amount: bondAmount,
+              tx_id: txId,
+            }),
+          }).catch(() => {});
+        }
       } else {
         setTxStatus('Transaction still pending - this may take a few minutes');
         toast.warning('Transaction pending - check Aleo Explorer for status');
@@ -338,14 +352,16 @@ export default function AgentDashboard() {
       setReputation(null);
 
       // Notify facilitator (non-blocking)
-      fetch(`${FACILITATOR_URL}/agents/unregister`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address: publicKey,
-          tx_id: txId,
-        }),
-      }).catch(() => {});
+      if (FACILITATOR_ENABLED) {
+        fetch(`${FACILITATOR_URL}/agents/unregister`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address: publicKey,
+            tx_id: txId,
+          }),
+        }).catch(() => {});
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unregistration failed';
       setError(errorMessage);
