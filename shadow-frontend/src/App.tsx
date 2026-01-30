@@ -1,6 +1,6 @@
 import { Component, ReactNode, useEffect } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
-import { Home, AlertTriangle } from 'lucide-react';
+import { Home, AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import AgentDashboard from './pages/AgentDashboard';
@@ -12,16 +12,32 @@ import { useSDKStore } from './stores/sdkStore';
 // 404 Page
 function NotFound() {
   return (
-    <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
-      <div className="text-6xl font-bold text-gray-700 mb-2">404</div>
-      <h1 className="text-2xl font-bold text-white mb-2">Page Not Found</h1>
-      <p className="text-gray-400 mb-8 text-center max-w-md">
+    <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+      <div className="relative mb-6">
+        <div className="text-[120px] font-bold leading-none tracking-tighter bg-gradient-to-b from-gray-600 to-gray-800 bg-clip-text text-transparent select-none">
+          404
+        </div>
+        <div className="absolute inset-0 text-[120px] font-bold leading-none tracking-tighter bg-gradient-to-b from-shadow-400/20 to-transparent bg-clip-text text-transparent blur-2xl select-none">
+          404
+        </div>
+      </div>
+      <h1 className="text-2xl font-bold text-white mb-2 tracking-tight">Page Not Found</h1>
+      <p className="text-gray-400 mb-10 text-center max-w-md text-sm leading-relaxed">
         The page you're looking for doesn't exist or has been moved.
       </p>
-      <Link to="/" className="btn btn-primary flex items-center gap-2">
-        <Home className="w-4 h-4" />
-        Go Home
-      </Link>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => window.history.back()}
+          className="btn btn-outline flex items-center gap-2"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Go Back
+        </button>
+        <Link to="/" className="btn btn-primary flex items-center gap-2">
+          <Home className="w-4 h-4" />
+          Go Home
+        </Link>
+      </div>
     </div>
   );
 }
@@ -51,17 +67,25 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-          <div className="card max-w-md w-full text-center animate-fade-in">
-            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-            <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
-            <p className="text-gray-400 mb-6 text-sm">
-              {this.state.error?.message || 'An unexpected error occurred.'}
+        <div className="min-h-screen bg-surface-0 flex items-center justify-center p-4">
+          <div className="max-w-md w-full text-center animate-fade-in">
+            <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="w-8 h-8 text-red-400" />
+            </div>
+            <h1 className="text-xl font-bold text-white mb-2 tracking-tight">Something went wrong</h1>
+            <p className="text-gray-400 mb-3 text-sm leading-relaxed">
+              An unexpected error occurred. Please try reloading the page.
             </p>
+            {this.state.error?.message && (
+              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 mb-6">
+                <p className="text-red-400 text-xs font-mono break-all">{this.state.error.message}</p>
+              </div>
+            )}
             <button
               onClick={() => window.location.reload()}
-              className="btn btn-primary"
+              className="btn btn-primary inline-flex items-center gap-2"
             >
+              <RefreshCw className="w-4 h-4" />
               Reload Page
             </button>
           </div>
