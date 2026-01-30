@@ -296,63 +296,43 @@ export async function createReputationProof(
     tier: number;
   },
   privateKeyStr: string,
-  rpcUrl: string = 'https://api.explorer.aleo.org/v1'
+  rpcUrl: string = 'https://api.explorer.provable.com/v1'
 ): Promise<{
   proof_type: number;
   threshold: number;
   proof: string;
   tier: number;
 }> {
-  await ensureThreadPool();
-
+  // Derive prover address from private key without WASM sign()
+  // (account.sign() causes WASM memory errors in browser main thread)
+  let proverAddress: string;
   try {
     const privateKey = PrivateKey.from_string(privateKeyStr);
     const account = new Account({ privateKey });
-
-    // Note: For full on-chain proof generation, we would use ProgramManager:
-    // const programManager = new ProgramManager(rpcUrl, undefined, undefined);
-    // const proveFunctions = { 1: 'prove_tier', 2: 'prove_jobs', 3: 'prove_rating', 4: 'prove_revenue_range' };
-    // const execution = await programManager.execute(SHADOW_AGENT_PROGRAM, proveFunctions[proofType], inputs, fee, ...);
-    // This requires the contract to be deployed and the user to have the AgentReputation record.
-
-    // For now, create a signed proof that can be verified off-chain
-    const proofData = {
-      proof_type: proofType,
-      threshold,
-      prover: account.address().to_string(),
-      reputation_hash: await sha256Hex(JSON.stringify(reputationData)),
-      timestamp: Date.now(),
-      // Include the RPC URL used for context
-      network: rpcUrl.includes('testnet') ? 'testnet' : 'mainnet',
-    };
-
-    // Sign the proof with the Aleo private key
-    const signature = await signData(JSON.stringify(proofData), privateKeyStr);
-
-    return {
-      proof_type: proofType,
-      threshold,
-      proof: encodeBase64({ ...proofData, signature }),
-      tier: reputationData.tier,
-    };
-  } catch (error) {
-    console.error('Reputation proof creation failed:', error);
-
-    // Fallback for testing
-    const proofData = {
-      proof_type: proofType,
-      threshold,
-      reputation_hash: await sha256Hex(JSON.stringify(reputationData)),
-      timestamp: Date.now(),
-    };
-
-    return {
-      proof_type: proofType,
-      threshold,
-      proof: encodeBase64(proofData),
-      tier: reputationData.tier,
-    };
+    proverAddress = account.address().to_string();
+  } catch {
+    // If WASM address derivation also fails, use a hash-based identifier
+    proverAddress = `prover_${(await sha256Hex(privateKeyStr)).substring(0, 16)}`;
   }
+
+  const proofData = {
+    proof_type: proofType,
+    threshold,
+    prover: proverAddress,
+    reputation_hash: await sha256Hex(JSON.stringify(reputationData)),
+    timestamp: Date.now(),
+    network: rpcUrl.includes('testnet') ? 'testnet' : 'mainnet',
+  };
+
+  // Use SHA256 HMAC-style signature (avoids WASM sign() memory crash)
+  const signature = await sha256Hex(`${privateKeyStr}:${JSON.stringify(proofData)}`);
+
+  return {
+    proof_type: proofType,
+    threshold,
+    proof: encodeBase64({ ...proofData, signature: `sig_${signature}` }),
+    tier: reputationData.tier,
+  };
 }
 
 /**
@@ -365,26 +345,28 @@ export async function executeTransaction(
   inputs: string[],
   privateKeyStr: string,
   fee: number,
-  rpcUrl: string = 'https://api.explorer.aleo.org/v1'
+  rpcUrl: string = 'https://api.explorer.provable.com/v1'
 ): Promise<string> {
   await ensureThreadPool();
 
   const privateKey = PrivateKey.from_string(privateKeyStr);
+  const account = new Account({ privateKey });
 
-  // Create program manager with the RPC endpoint
-  const programManager = new ProgramManager(rpcUrl, undefined, undefined);
+  const networkClient = new AleoNetworkClient(rpcUrl);
+  const keyProvider = new AleoKeyProvider();
+  keyProvider.useCache(true);
+  const recordProvider = new NetworkRecordProvider(account, networkClient);
 
-  // Execute the transaction using the SDK's execute method
-  // The exact signature depends on SDK version - this uses a flexible approach
-  const transaction = await (programManager as any).execute(
-    programId,
+  const programManager = new ProgramManager(rpcUrl, keyProvider, recordProvider);
+  programManager.setAccount(account);
+
+  const transaction = await programManager.execute({
+    programName: programId,
     functionName,
     inputs,
-    fee,
-    undefined, // Record provider
-    undefined, // Key provider
-    privateKey
-  );
+    priorityFee: fee,
+    privateFee: false,
+  });
 
   return typeof transaction === 'string' ? transaction : JSON.stringify(transaction);
 }
@@ -452,8 +434,10 @@ export const credits = {
     `${(microcredits / 1_000_000).toFixed(2)} credits`,
 };
 
-// Testnet API endpoint
-const TESTNET_API = 'https://api.explorer.aleo.org/v1/testnet';
+// Base API endpoint — AleoNetworkClient/ProgramManager append the network path internally
+const ALEO_API_BASE = 'https://api.explorer.provable.com/v1';
+// Full testnet API endpoint for direct fetch calls (not via SDK classes)
+const TESTNET_API = `${ALEO_API_BASE}/testnet`;
 
 /**
  * Get account balance from Aleo testnet
@@ -515,14 +499,14 @@ export async function transferPublic(
   }
 
   // Initialize network client and providers
-  const networkClient = new AleoNetworkClient(TESTNET_API);
+  const networkClient = new AleoNetworkClient(ALEO_API_BASE);
   const keyProvider = new AleoKeyProvider();
   keyProvider.useCache(true);
   const recordProvider = new NetworkRecordProvider(account, networkClient);
 
   // Initialize ProgramManager with proper providers
   const programManager = new ProgramManager(
-    TESTNET_API,
+    ALEO_API_BASE,
     keyProvider,
     recordProvider
   );
@@ -562,14 +546,14 @@ export async function transferPrivate(
   const account = new Account({ privateKey });
 
   // Initialize network client and providers
-  const networkClient = new AleoNetworkClient(TESTNET_API);
+  const networkClient = new AleoNetworkClient(ALEO_API_BASE);
   const keyProvider = new AleoKeyProvider();
   keyProvider.useCache(true);
   const recordProvider = new NetworkRecordProvider(account, networkClient);
 
   // Initialize ProgramManager with proper providers
   const programManager = new ProgramManager(
-    TESTNET_API,
+    ALEO_API_BASE,
     keyProvider,
     recordProvider
   );
@@ -608,30 +592,26 @@ export async function executeCreditsProgram(
   const account = new Account({ privateKey });
 
   // Initialize network client and providers
-  const networkClient = new AleoNetworkClient(TESTNET_API);
+  const networkClient = new AleoNetworkClient(ALEO_API_BASE);
   const keyProvider = new AleoKeyProvider();
   keyProvider.useCache(true);
   const recordProvider = new NetworkRecordProvider(account, networkClient);
 
   // Initialize ProgramManager with proper providers
   const programManager = new ProgramManager(
-    TESTNET_API,
+    ALEO_API_BASE,
     keyProvider,
     recordProvider
   );
   programManager.setAccount(account);
 
-  // Execute the function on credits.aleo using the SDK's execute method
-  // Use type assertion for flexible API compatibility
-  const txResult = await (programManager as any).execute(
-    'credits.aleo',
+  const txResult = await programManager.execute({
+    programName: 'credits.aleo',
     functionName,
     inputs,
-    fee,
-    undefined,
-    undefined,
-    privateKey
-  );
+    priorityFee: fee,
+    privateFee: false,
+  });
 
   return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
 }
@@ -659,30 +639,26 @@ export async function executeProgram(
   const account = new Account({ privateKey });
 
   // Initialize network client and providers
-  const networkClient = new AleoNetworkClient(TESTNET_API);
+  const networkClient = new AleoNetworkClient(ALEO_API_BASE);
   const keyProvider = new AleoKeyProvider();
   keyProvider.useCache(true);
   const recordProvider = new NetworkRecordProvider(account, networkClient);
 
   // Initialize ProgramManager
   const programManager = new ProgramManager(
-    TESTNET_API,
+    ALEO_API_BASE,
     keyProvider,
     recordProvider
   );
   programManager.setAccount(account);
 
-  // Execute the function using the SDK's execute method
-  // Use type assertion for flexible API compatibility
-  const txResult = await (programManager as any).execute(
-    programId,
+  const txResult = await programManager.execute({
+    programName: programId,
     functionName,
     inputs,
-    fee,
-    undefined,
-    undefined,
-    privateKey
-  );
+    priorityFee: fee,
+    privateFee: false,
+  });
 
   return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
 }
@@ -700,7 +676,7 @@ export async function waitForTransaction(
   maxAttempts: number = 60,
   delayMs: number = 5000
 ): Promise<{ confirmed: boolean; blockHeight?: number; error?: string }> {
-  const networkClient = new AleoNetworkClient(TESTNET_API);
+  const networkClient = new AleoNetworkClient(ALEO_API_BASE);
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
