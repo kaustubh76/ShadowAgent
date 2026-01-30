@@ -28,6 +28,10 @@ interface VerificationResult {
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+// Facilitator backend availability flag
+// Set to true when VITE_FACILITATOR_URL points to a running backend
+const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+
 // Health status type (SDK returns simplified version)
 interface HealthStatus {
   status: 'ok' | 'degraded' | 'down' | string;
@@ -62,70 +66,81 @@ function getClient() {
   }
 }
 
+// Empty result when facilitator is unavailable
+const EMPTY_SEARCH: SearchResult = { agents: [], total: 0, limit: 20, offset: 0 };
+
 // Search for agents - uses SDK client if available
 export async function searchAgents(
   filters: SearchFilters,
   limit = 20,
   offset = 0
 ): Promise<SearchResult> {
-  const client = getClient();
-
-  if (client) {
-    // Use SDK client
-    const searchParams: SearchParams = {
-      service_type: filters.service_type,
-      min_tier: filters.min_tier,
-      is_active: filters.is_active,
-      limit,
-      offset,
-    };
-    return client.searchAgents(searchParams);
+  // Skip fetch when facilitator backend is not configured
+  if (!FACILITATOR_ENABLED) {
+    return { ...EMPTY_SEARCH, limit, offset };
   }
 
-  // Fallback to direct fetch
-  const params = new URLSearchParams();
+  try {
+    const client = getClient();
 
-  if (filters.service_type !== undefined) {
-    params.set('service_type', String(filters.service_type));
-  }
-  if (filters.min_tier !== undefined) {
-    params.set('min_tier', String(filters.min_tier));
-  }
-  if (filters.is_active !== undefined) {
-    params.set('is_active', String(filters.is_active));
-  }
-  params.set('limit', String(limit));
-  params.set('offset', String(offset));
+    if (client) {
+      const searchParams: SearchParams = {
+        service_type: filters.service_type,
+        min_tier: filters.min_tier,
+        is_active: filters.is_active,
+        limit,
+        offset,
+      };
+      return await client.searchAgents(searchParams);
+    }
 
-  const response = await fetch(`${API_BASE}/agents?${params.toString()}`);
+    const params = new URLSearchParams();
 
-  if (!response.ok) {
-    throw new Error(`Failed to search agents: ${response.statusText}`);
+    if (filters.service_type !== undefined) {
+      params.set('service_type', String(filters.service_type));
+    }
+    if (filters.min_tier !== undefined) {
+      params.set('min_tier', String(filters.min_tier));
+    }
+    if (filters.is_active !== undefined) {
+      params.set('is_active', String(filters.is_active));
+    }
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+
+    const response = await fetch(`${API_BASE}/agents?${params.toString()}`);
+
+    if (!response.ok) {
+      return { ...EMPTY_SEARCH, limit, offset };
+    }
+
+    return response.json();
+  } catch {
+    return { ...EMPTY_SEARCH, limit, offset };
   }
-
-  return response.json();
 }
 
 // Get a specific agent - uses SDK client if available
 export async function getAgent(agentId: string): Promise<AgentListing | null> {
-  const client = getClient();
+  if (!FACILITATOR_ENABLED) return null;
 
-  if (client) {
-    return client.getAgent(agentId);
-  }
+  try {
+    const client = getClient();
 
-  // Fallback to direct fetch
-  const response = await fetch(`${API_BASE}/agents/${agentId}`);
+    if (client) {
+      return await client.getAgent(agentId);
+    }
 
-  if (response.status === 404) {
+    const response = await fetch(`${API_BASE}/agents/${agentId}`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return response.json();
+  } catch {
     return null;
   }
-
-  if (!response.ok) {
-    throw new Error(`Failed to get agent: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 // Verify an escrow proof (direct fetch only - SDK doesn't have this method)
@@ -168,25 +183,30 @@ export async function verifyReputationProof(proof: ReputationProofInput): Promis
 }
 
 // Get health status - uses SDK client if available
-export async function getHealth(): Promise<HealthStatus> {
-  const client = getClient();
+export async function getHealth(): Promise<HealthStatus | null> {
+  if (!FACILITATOR_ENABLED) return null;
 
-  if (client) {
-    const health = await client.getHealth();
-    return {
-      status: health.status as HealthStatus['status'],
-      blockHeight: health.blockHeight,
-    };
+  try {
+    const client = getClient();
+
+    if (client) {
+      const health = await client.getHealth();
+      return {
+        status: health.status as HealthStatus['status'],
+        blockHeight: health.blockHeight,
+      };
+    }
+
+    const response = await fetch(`${API_BASE}/health`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return response.json();
+  } catch {
+    return null;
   }
-
-  // Fallback to direct fetch
-  const response = await fetch(`${API_BASE}/health`);
-
-  if (!response.ok) {
-    throw new Error(`Health check failed: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 // Get readiness status
