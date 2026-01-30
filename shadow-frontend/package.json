@@ -12,12 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@demox-labs/aleo-wallet-adapter-base": "^0.0.23",
-    "@demox-labs/aleo-wallet-adapter-leo": "^0.0.25",
-    "@demox-labs/aleo-wallet-adapter-react": "^0.0.22",
-    "@demox-labs/aleo-wallet-adapter-reactui": "^0.0.36",
+    "@provablehq/sdk": "^0.9.15",
     "@shadowagent/sdk": "file:../shadow-sdk",
-    "aleo-adapters": "^1.2.1",
     "clsx": "^2.0.0",
     "lucide-react": "^0.303.0",
     "react": "^18.2.0",
