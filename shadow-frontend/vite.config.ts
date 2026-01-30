@@ -11,13 +11,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-    },
+    // Proxy to facilitator backend — enable when running the backend on :3001
+    // proxy: {
+    //   '/api': {
+    //     target: 'http://localhost:3001',
+    //     changeOrigin: true,
+    //     rewrite: (path: string) => path.replace(/^\/api/, ''),
+    //   },
+    // },
     fs: {
       // Allow serving files from the SDK's node_modules for WASM
       allow: [
