@@ -7,6 +7,7 @@ import clsx from 'clsx';
 export default function Header() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   const navItems = [
     { path: '/', label: 'Home', icon: Shield },
@@ -19,37 +20,65 @@ export default function Header() {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  // Track scroll for header background intensity
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 16);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return (
-    <header className="border-b border-gray-800/50 bg-gray-900/80 backdrop-blur-lg sticky top-0 z-50">
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+    <header
+      className={clsx(
+        'sticky top-0 z-50 transition-all duration-500',
+        scrolled
+          ? 'bg-surface-0/80 backdrop-blur-2xl border-b border-white/[0.06] shadow-lg shadow-black/20'
+          : 'bg-transparent border-b border-transparent'
+      )}
+    >
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-[72px]">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 hover:scale-105 transition-transform duration-200">
-            <Shield className="w-8 h-8 text-shadow-500" />
-            <span className="text-xl font-bold text-white">ShadowAgent</span>
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="relative">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-shadow-500 to-shadow-700 flex items-center justify-center shadow-glow-sm group-hover:shadow-glow transition-shadow duration-500">
+                <Shield className="w-5 h-5 text-white" />
+              </div>
+              <div className="absolute -inset-1 rounded-xl bg-shadow-500/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            </div>
+            <span className="text-lg font-bold text-white tracking-tight">
+              Shadow<span className="text-shadow-400">Agent</span>
+            </span>
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={clsx(
-                    'relative flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200',
-                    isActive
-                      ? 'bg-shadow-600/20 text-shadow-400 after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:w-8 after:h-0.5 after:bg-shadow-500 after:rounded-full'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
+          <nav className="hidden md:flex items-center">
+            <div className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.04]">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={clsx(
+                      'relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300',
+                      isActive
+                        ? 'bg-shadow-600/20 text-shadow-300 shadow-inner-glow'
+                        : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                    {isActive && (
+                      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-shadow-500 rounded-full" />
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
           </nav>
 
           {/* Desktop Wallet */}
@@ -60,11 +89,16 @@ export default function Header() {
           {/* Mobile Hamburger Button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden text-gray-400 hover:text-white transition-colors duration-200 p-2"
+            className={clsx(
+              'md:hidden p-2.5 rounded-xl transition-all duration-300',
+              mobileMenuOpen
+                ? 'bg-surface-3 text-white'
+                : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
+            )}
             aria-label="Toggle navigation menu"
             aria-expanded={mobileMenuOpen}
           >
-            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -72,12 +106,12 @@ export default function Header() {
       {/* Mobile Navigation Panel */}
       {mobileMenuOpen && (
         <nav
-          className="md:hidden border-t border-gray-800/50 bg-gray-900/95 backdrop-blur-lg animate-fade-in-down"
+          className="md:hidden border-t border-white/[0.04] bg-surface-0/95 backdrop-blur-2xl animate-fade-in-down"
           role="navigation"
           aria-hidden={!mobileMenuOpen}
         >
-          <div className="container mx-auto px-4 py-4 space-y-2">
-            {navItems.map((item) => {
+          <div className="container mx-auto px-4 py-4 space-y-1">
+            {navItems.map((item, index) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               return (
@@ -85,18 +119,19 @@ export default function Header() {
                   key={item.path}
                   to={item.path}
                   className={clsx(
-                    'flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200',
+                    'flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 opacity-0 animate-fade-in-up',
                     isActive
-                      ? 'bg-shadow-600/20 text-shadow-400'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                      ? 'bg-shadow-600/15 text-shadow-300 border border-shadow-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
                   )}
+                  style={{ animationDelay: `${index * 0.05}s`, animationFillMode: 'forwards' }}
                 >
                   <Icon className="w-5 h-5" />
                   <span className="font-medium">{item.label}</span>
                 </Link>
               );
             })}
-            <div className="pt-3 border-t border-gray-800/50">
+            <div className="pt-4 border-t border-white/[0.04]">
               <ConnectWallet />
             </div>
           </div>
