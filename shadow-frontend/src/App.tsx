@@ -98,20 +98,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 }
 
 function App() {
-  const { initializeClient, checkHealth } = useSDKStore();
+  const { initializeClient } = useSDKStore();
 
-  // Initialize SDK client on app load
+  // Initialize SDK client on app load (health checks disabled — no facilitator backend)
   useEffect(() => {
-    // Initialize the SDK client with default config
     initializeClient();
-
-    // Set up periodic health checks (every 30 seconds)
-    const healthInterval = setInterval(() => {
-      checkHealth();
-    }, 30000);
-
-    return () => clearInterval(healthInterval);
-  }, [initializeClient, checkHealth]);
+  }, [initializeClient]);
 
   return (
     <ErrorBoundary>

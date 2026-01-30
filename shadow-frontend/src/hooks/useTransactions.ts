@@ -200,54 +200,36 @@ export function useReputationProof() {
     setStatus(`Generating ${proofType} proof...`);
 
     try {
-      // Lazy import SDK enums
-      const { ProofType } = await import('@shadowagent/sdk');
+      // Lazy import SDK to avoid WASM loading at module parse time
+      const { ProofType, createReputationProof } = await import('@shadowagent/sdk');
 
-      // Map proof type to SDK enum
       const proofTypeMap: Record<string, number> = {
-        tier: ProofType.Tier,
-        jobs: ProofType.Jobs,
         rating: ProofType.Rating,
+        jobs: ProofType.Jobs,
+        tier: ProofType.Tier,
       };
 
-      // Get threshold based on proof type
       const thresholds: Record<string, number> = {
         tier: reputation.tier,
         jobs: reputation.totalJobs,
         rating: reputation.totalRatingPoints,
       };
 
-      // Use private key from env if not provided
       const key = privateKey || import.meta.env.VITE_SHIELD_WALLET_PRIVATE_KEY;
 
-      if (key) {
-        // Lazy import for createReputationProof
-        const { createReputationProof } = await import('@shadowagent/sdk');
-
-        // Generate real ZK proof with SDK
-        const proof = await createReputationProof(
-          proofTypeMap[proofType],
-          thresholds[proofType],
-          reputation,
-          key
-        );
-
-        setStatus('Proof generated!');
-        return { success: true, proof: JSON.stringify(proof, null, 2) };
-      } else {
-        // Generate demo proof without private key
-        const demoProof = {
-          proof_type: proofTypeMap[proofType],
-          threshold: thresholds[proofType],
-          proof: `demo_proof_${Date.now()}`,
-          tier: reputation.tier,
-          prover: publicKey,
-          timestamp: Date.now(),
-        };
-
-        setStatus('Demo proof generated (no private key)');
-        return { success: true, proof: JSON.stringify(demoProof, null, 2) };
+      if (!key) {
+        return { success: false, error: 'Private key required for proof generation' };
       }
+
+      const proof = await createReputationProof(
+        proofTypeMap[proofType],
+        thresholds[proofType],
+        reputation,
+        key
+      );
+
+      setStatus('Proof generated!');
+      return { success: true, proof: JSON.stringify(proof, null, 2) };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Proof generation failed';
       setStatus(null);
