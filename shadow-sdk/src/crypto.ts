@@ -1,19 +1,16 @@
 // ShadowAgent SDK - Cryptographic Utilities with Real Aleo Integration
-// Uses Web Crypto API for browser compatibility
-
-import {
-  Account,
-  ProgramManager,
-  PrivateKey,
-  RecordPlaintext,
-  initThreadPool,
-  AleoNetworkClient,
-  NetworkRecordProvider,
-  AleoKeyProvider,
-} from '@provablehq/sdk';
+// Uses lazy imports for @provablehq/sdk to avoid WASM loading at module parse time.
+// Static imports cause "RuntimeError: memory access out of bounds" in browser
+// because WASM memory isn't ready at bundle parse time.
 
 // Program ID for ShadowAgent
 export const SHADOW_AGENT_PROGRAM = 'shadow_agent.aleo';
+
+// --- Lazy SDK loader (defers WASM until runtime) ---
+
+async function getSDK() {
+  return await import('@provablehq/sdk');
+}
 
 // --- Browser-compatible crypto helpers ---
 
@@ -36,6 +33,7 @@ let threadPoolInitialized = false;
 async function ensureThreadPool() {
   if (!threadPoolInitialized) {
     try {
+      const { initThreadPool } = await getSDK();
       await initThreadPool();
       threadPoolInitialized = true;
     } catch (error) {
@@ -140,9 +138,9 @@ export function generateSessionId(): string {
 /**
  * Create an Aleo account from private key
  */
-export function createAccount(privateKeyStr: string): Account {
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  return new Account({ privateKey });
+export async function createAccount(privateKeyStr: string) {
+  const { Account } = await getSDK();
+  return new Account({ privateKey: privateKeyStr });
 }
 
 /**
@@ -155,8 +153,10 @@ export async function signData(
   await ensureThreadPool();
 
   try {
-    const privateKey = PrivateKey.from_string(privateKeyStr);
-    const account = new Account({ privateKey });
+    // Use Account({ privateKey: string }) pattern — matches WalletProvider.tsx
+    // Avoids PrivateKey.from_string() which triggers WASM memory crash
+    const { Account } = await getSDK();
+    const account = new Account({ privateKey: privateKeyStr });
 
     // Convert data to bytes for signing
     const dataBytes = new TextEncoder().encode(data);
@@ -191,7 +191,7 @@ export async function verifySignature(
     }
 
     // Real Aleo signature verification
-    const { Signature, Address } = await import('@provablehq/sdk');
+    const { Signature, Address } = await getSDK();
     const sig = Signature.from_string(signature);
     const address = Address.from_string(publicKeyStr);
     const dataBytes = new TextEncoder().encode(data);
@@ -303,17 +303,13 @@ export async function createReputationProof(
   proof: string;
   tier: number;
 }> {
-  // Derive prover address from private key without WASM sign()
-  // (account.sign() causes WASM memory errors in browser main thread)
-  let proverAddress: string;
-  try {
-    const privateKey = PrivateKey.from_string(privateKeyStr);
-    const account = new Account({ privateKey });
-    proverAddress = account.address().to_string();
-  } catch {
-    // If WASM address derivation also fails, use a hash-based identifier
-    proverAddress = `prover_${(await sha256Hex(privateKeyStr)).substring(0, 16)}`;
-  }
+  await ensureThreadPool();
+
+  // Use Account({ privateKey: string }) pattern — matches WalletProvider.tsx
+  // Avoids PrivateKey.from_string() which triggers WASM memory crash
+  const { Account } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
+  const proverAddress = account.address().to_string();
 
   const proofData = {
     proof_type: proofType,
@@ -324,13 +320,13 @@ export async function createReputationProof(
     network: rpcUrl.includes('testnet') ? 'testnet' : 'mainnet',
   };
 
-  // Use SHA256 HMAC-style signature (avoids WASM sign() memory crash)
-  const signature = await sha256Hex(`${privateKeyStr}:${JSON.stringify(proofData)}`);
+  // Sign the proof with the Aleo private key
+  const signature = await signData(JSON.stringify(proofData), privateKeyStr);
 
   return {
     proof_type: proofType,
     threshold,
-    proof: encodeBase64({ ...proofData, signature: `sig_${signature}` }),
+    proof: encodeBase64({ ...proofData, signature }),
     tier: reputationData.tier,
   };
 }
@@ -349,8 +345,8 @@ export async function executeTransaction(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
 
   const networkClient = new AleoNetworkClient(rpcUrl);
   const keyProvider = new AleoKeyProvider();
@@ -376,13 +372,12 @@ export async function executeTransaction(
  * @param ciphertext - The encrypted record ciphertext
  * @param _viewKey - The view key (reserved for future use with proper decryption)
  */
-export function decryptRecord(
+export async function decryptRecord(
   ciphertext: string,
   _viewKey?: string
-): RecordPlaintext | null {
+) {
   try {
-    // Note: Full decryption with view key requires additional SDK methods
-    // For now, attempt to parse if it's already plaintext
+    const { RecordPlaintext } = await getSDK();
     return RecordPlaintext.fromString(ciphertext);
   } catch {
     return null;
@@ -392,16 +387,17 @@ export function decryptRecord(
 /**
  * Get address from private key
  */
-export function getAddress(privateKeyStr: string): string {
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+export async function getAddress(privateKeyStr: string): Promise<string> {
+  const { Account } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
   return account.address().to_string();
 }
 
 /**
  * Generate a new Aleo private key
  */
-export function generatePrivateKey(): string {
+export async function generatePrivateKey(): Promise<string> {
+  const { PrivateKey } = await getSDK();
   const privateKey = new PrivateKey();
   return privateKey.to_string();
 }
@@ -484,8 +480,8 @@ export async function transferPublic(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
   const senderAddress = account.address().to_string();
 
   // Check balance first
@@ -542,8 +538,8 @@ export async function transferPrivate(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
 
   // Initialize network client and providers
   const networkClient = new AleoNetworkClient(ALEO_API_BASE);
@@ -588,8 +584,8 @@ export async function executeCreditsProgram(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
 
   // Initialize network client and providers
   const networkClient = new AleoNetworkClient(ALEO_API_BASE);
@@ -635,8 +631,8 @@ export async function executeProgram(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const privateKey = PrivateKey.from_string(privateKeyStr);
-  const account = new Account({ privateKey });
+  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const account = new Account({ privateKey: privateKeyStr });
 
   // Initialize network client and providers
   const networkClient = new AleoNetworkClient(ALEO_API_BASE);
@@ -676,6 +672,7 @@ export async function waitForTransaction(
   maxAttempts: number = 60,
   delayMs: number = 5000
 ): Promise<{ confirmed: boolean; blockHeight?: number; error?: string }> {
+  const { AleoNetworkClient } = await getSDK();
   const networkClient = new AleoNetworkClient(ALEO_API_BASE);
 
   for (let i = 0; i < maxAttempts; i++) {
