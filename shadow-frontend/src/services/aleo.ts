@@ -1,8 +1,6 @@
 // Real Aleo blockchain service for frontend
 // Defines types/enums locally to avoid eager SDK imports that trigger WASM loading
 
-import { WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
-
 // ============================================
 // Types & Enums (mirrored from SDK to avoid WASM import)
 // ============================================
@@ -151,8 +149,8 @@ export const credits = {
 export const SHADOW_AGENT_PROGRAM_ID = 'shadow_agent.aleo';
 
 // Network configuration
-export const ALEO_NETWORK = WalletAdapterNetwork.TestnetBeta;
-export const ALEO_RPC_URL = 'https://api.explorer.aleo.org/v1';
+export const ALEO_NETWORK = 'testnet' as const;
+export const ALEO_RPC_URL = 'https://api.explorer.provable.com/v1';
 
 // Contract constants
 export const REGISTRATION_BOND = 10_000_000; // 10 credits in microcredits
@@ -245,11 +243,11 @@ export async function isNullifierUsed(nullifier: string): Promise<boolean> {
 }
 
 // ============================================
-// Leo Wallet Transaction Builders
+// Shield Wallet Transaction Builders
 // ============================================
 
 /**
- * Build register_agent transaction inputs for Leo wallet
+ * Build register_agent transaction inputs for Shield Wallet
  */
 export function buildRegisterAgentInputs(
   serviceType: number,
@@ -266,7 +264,7 @@ export function buildRegisterAgentInputs(
 }
 
 /**
- * Build submit_rating transaction inputs for Leo wallet
+ * Build submit_rating transaction inputs for Shield Wallet
  */
 export function buildSubmitRatingInputs(
   agentId: string,
@@ -285,7 +283,7 @@ export function buildSubmitRatingInputs(
 }
 
 /**
- * Build create_escrow transaction inputs for Leo wallet
+ * Build create_escrow transaction inputs for Shield Wallet
  */
 export function buildCreateEscrowInputs(
   agentAddress: string,
@@ -307,7 +305,7 @@ export function buildCreateEscrowInputs(
 }
 
 // ============================================
-// Leo Wallet Input Formatters
+// Input Formatters
 // ============================================
 
 export function formatFieldForLeo(value: string): string {
@@ -338,7 +336,7 @@ export function formatAddressForLeo(address: string): string {
 // ============================================
 
 /**
- * Parse Leo struct response into AgentListing
+ * Parse Aleo struct response into AgentListing
  */
 function parseAgentListing(data: string): AgentListing | null {
   try {
@@ -366,7 +364,7 @@ function parseAgentListing(data: string): AgentListing | null {
 
 /**
  * Simple hash function for creating field values
- * Used for Leo wallet transaction inputs
+ * Used for Shield Wallet transaction inputs
  */
 function hashToField(data: string): string {
   let hash = 0;

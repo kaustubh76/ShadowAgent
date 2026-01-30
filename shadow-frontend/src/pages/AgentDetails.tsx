@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck } from 'lucide-react';
 import { AgentListing, Tier, getServiceTypeName, getTierName } from '../stores/agentStore';
 import { getAgent, verifyReputationProof } from '../lib/api';
 import TierBadge from '../components/TierBadge';
@@ -9,10 +9,10 @@ import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { useEscrowTransaction, useBalanceCheck } from '../hooks/useTransactions';
 
 const privacyChecks = [
-  'Job count verified (not revealed)',
-  'Revenue threshold verified (not revealed)',
-  'Average rating verified (not revealed)',
-  'Identity verified via staking bond (Sybil resistant)',
+  { text: 'Job count verified (not revealed)', icon: Eye },
+  { text: 'Revenue threshold verified (not revealed)', icon: Lock },
+  { text: 'Average rating verified (not revealed)', icon: ShieldCheck },
+  { text: 'Identity verified via staking bond (Sybil resistant)', icon: Fingerprint },
 ];
 
 // Reputation Proof Modal
@@ -45,61 +45,71 @@ function ReputationProofModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in overflow-y-auto" onClick={onClose}>
       <div
-        className="card max-w-lg w-full my-8 animate-scale-in"
+        className="relative max-w-lg w-full my-8 bg-surface-1 border border-white/[0.06] rounded-2xl p-6 shadow-2xl animate-scale-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="reputation-modal-title"
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 id="reputation-modal-title" className="text-lg font-semibold text-white flex items-center gap-2">
-            <FileCheck className="w-5 h-5 text-shadow-400" />
+        {/* Modal header */}
+        <div className="flex items-center justify-between mb-6">
+          <h2 id="reputation-modal-title" className="text-lg font-semibold text-white flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-shadow-600/15 flex items-center justify-center">
+              <FileCheck className="w-4 h-4 text-shadow-400" />
+            </div>
             Reputation Proof
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-gray-500 hover:text-white transition-all duration-300 p-1.5 rounded-lg hover:bg-white/[0.04]"
             aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div className="bg-gray-800/50 rounded-lg p-4 space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Agent ID</span>
-              <span className="text-white font-mono text-xs truncate max-w-[200px]">{agent.agent_id}</span>
+        <div className="space-y-5">
+          {/* Agent info table */}
+          <div className="bg-surface-0/60 border border-white/[0.04] rounded-xl p-4 space-y-3">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Agent ID</span>
+              <span className="text-gray-300 font-mono text-xs truncate max-w-[200px]">{agent.agent_id}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Claimed Tier</span>
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Claimed Tier</span>
               <TierBadge tier={agent.tier} size="sm" />
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Service Type</span>
-              <span className="text-white">{getServiceTypeName(agent.service_type)}</span>
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Service Type</span>
+              <span className="text-white font-medium">{getServiceTypeName(agent.service_type)}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Endpoint Hash</span>
-              <span className="text-white font-mono text-xs">{agent.endpoint_hash}</span>
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Endpoint Hash</span>
+              <span className="text-gray-300 font-mono text-xs">{agent.endpoint_hash}</span>
             </div>
           </div>
 
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-400 text-sm leading-relaxed">
             This agent's tier badge is backed by a zero-knowledge proof verifying their on-chain
-            reputation meets the {getTierName(agent.tier)} threshold — without revealing exact statistics.
+            reputation meets the <span className="text-white font-medium">{getTierName(agent.tier)}</span> threshold — without revealing exact statistics.
           </p>
 
+          {/* Verification result */}
           {result && (
-            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm animate-fade-in ${
-              result.valid ? 'bg-green-900/50 text-green-300' : 'bg-yellow-900/50 text-yellow-300'
+            <div className={`flex items-center gap-2.5 p-3.5 rounded-xl text-sm animate-fade-in border ${
+              result.valid
+                ? 'bg-green-500/5 border-green-500/20 text-green-400'
+                : 'bg-yellow-500/5 border-yellow-500/20 text-yellow-400'
             }`}>
               {result.valid ? (
-                <><Check className="w-4 h-4" /> Proof verified — tier is cryptographically valid</>
+                <><Check className="w-4 h-4 flex-shrink-0" /> Proof verified — tier is cryptographically valid</>
               ) : (
-                <><AlertCircle className="w-4 h-4" /> {result.error}</>
+                <><AlertCircle className="w-4 h-4 flex-shrink-0" /> {result.error}</>
               )}
             </div>
           )}
@@ -165,43 +175,49 @@ function RequestServiceModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in overflow-y-auto" onClick={onClose}>
       <div
-        className="card max-w-lg w-full my-8 animate-scale-in"
+        className="relative max-w-lg w-full my-8 bg-surface-1 border border-white/[0.06] rounded-2xl p-6 shadow-2xl animate-scale-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="request-modal-title"
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 id="request-modal-title" className="text-lg font-semibold text-white flex items-center gap-2">
-            <Zap className="w-5 h-5 text-shadow-400" />
+        {/* Modal header */}
+        <div className="flex items-center justify-between mb-6">
+          <h2 id="request-modal-title" className="text-lg font-semibold text-white flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-shadow-600/15 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-shadow-400" />
+            </div>
             Request Service
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-gray-500 hover:text-white transition-all duration-300 p-1.5 rounded-lg hover:bg-white/[0.04]"
             aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div className="bg-gray-800/50 rounded-lg p-4 space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Agent</span>
-              <span className="text-white">{getServiceTypeName(agent.service_type)} Agent</span>
+        <div className="space-y-5">
+          {/* Agent summary */}
+          <div className="bg-surface-0/60 border border-white/[0.04] rounded-xl p-4 space-y-3">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Agent</span>
+              <span className="text-white font-medium">{getServiceTypeName(agent.service_type)} Agent</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Tier</span>
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-500">Tier</span>
               <TierBadge tier={agent.tier} size="sm" />
             </div>
           </div>
 
+          {/* Payment amount */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Payment Amount (credits)</label>
-            <div className="flex items-center gap-2">
+            <label className="block text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Payment Amount (credits)</label>
+            <div className="flex items-center gap-3">
               <input
                 type="number"
                 value={amount}
@@ -211,14 +227,15 @@ function RequestServiceModal({
                 className="input"
                 disabled={isLoading}
               />
-              <span className="text-gray-400">ALEO</span>
+              <span className="text-gray-400 text-sm font-medium">ALEO</span>
             </div>
-            <p className="text-xs text-gray-500 mt-1">Balance: {formattedBalance}</p>
+            <p className="text-xs text-gray-500 mt-1.5">Balance: <span className="text-gray-400">{formattedBalance}</span></p>
           </div>
 
-          <div className="bg-purple-900/30 rounded-lg p-3 text-sm">
-            <p className="text-gray-300 mb-2">The x402 protocol will:</p>
-            <ol className="list-decimal list-inside text-gray-400 space-y-1 text-xs">
+          {/* x402 protocol info */}
+          <div className="bg-shadow-950/40 border border-shadow-500/10 rounded-xl p-4 text-sm">
+            <p className="text-gray-300 mb-3 font-medium">The x402 protocol will:</p>
+            <ol className="list-decimal list-inside text-gray-400 space-y-1.5 text-xs leading-relaxed">
               <li>Lock {amount || '0'} credits in an escrow contract</li>
               <li>Agent delivers the service</li>
               <li>Escrow auto-releases payment on completion</li>
@@ -226,9 +243,14 @@ function RequestServiceModal({
             </ol>
           </div>
 
+          {/* Status */}
           {displayStatus && (
-            <div className="flex items-center gap-2 bg-blue-900/50 text-blue-300 p-3 rounded-lg text-sm animate-fade-in">
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4 text-green-400" />}
+            <div className={`flex items-center gap-2.5 p-3.5 rounded-xl text-sm animate-fade-in border ${
+              isLoading
+                ? 'bg-blue-500/5 border-blue-500/20 text-blue-400'
+                : 'bg-green-500/5 border-green-500/20 text-green-400'
+            }`}>
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" /> : <Check className="w-4 h-4 flex-shrink-0" />}
               <span>{displayStatus}</span>
             </div>
           )}
@@ -298,19 +320,25 @@ export default function AgentDetails() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="animate-spin w-8 h-8 border-2 border-shadow-400 border-t-transparent rounded-full" />
+      <div className="flex items-center justify-center py-24">
+        <div className="relative">
+          <div className="w-10 h-10 border-2 border-shadow-500/30 rounded-full" />
+          <div className="absolute inset-0 w-10 h-10 border-2 border-shadow-400 border-t-transparent rounded-full animate-spin" />
+        </div>
       </div>
     );
   }
 
   if (!agent) {
     return (
-      <div className="text-center py-16 animate-fade-in">
+      <div className="text-center py-24 animate-fade-in">
+        <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-white/[0.06] flex items-center justify-center mx-auto mb-5">
+          <AlertCircle className="w-8 h-8 text-gray-600" />
+        </div>
         <h1 className="text-2xl font-bold text-white mb-2">Agent Not Found</h1>
-        <p className="text-gray-400 mb-6">The agent you're looking for doesn't exist.</p>
-        <Link to="/client" className="btn btn-primary">
-          <ArrowLeft className="w-4 h-4 mr-2" />
+        <p className="text-gray-400 mb-8 text-sm">The agent you're looking for doesn't exist.</p>
+        <Link to="/client" className="btn btn-primary inline-flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" />
           Back to Search
         </Link>
       </div>
@@ -322,38 +350,38 @@ export default function AgentDetails() {
       {/* Back Link */}
       <Link
         to="/client"
-        className="group inline-flex items-center text-gray-400 hover:text-white mb-6 transition-colors"
+        className="group inline-flex items-center text-gray-500 hover:text-white mb-8 transition-all duration-300 text-sm"
       >
-        <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform duration-200" />
+        <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform duration-300" />
         Back to Agent Search
       </Link>
 
       {/* Error Banner */}
       {error && (
-        <div className="flex items-center gap-2 bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 p-3 rounded-lg mb-6 text-sm animate-fade-in-down">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{error} — showing demo data below.</span>
+        <div className="flex items-center gap-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mb-6 text-sm animate-fade-in-down">
+          <div className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" />
+          <span className="text-yellow-400">{error} — showing demo data below.</span>
         </div>
       )}
 
-      {/* Header */}
+      {/* Header Card */}
       <div className="card mb-6 animate-fade-in">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold text-white">
+            <div className="flex items-center gap-3 mb-3">
+              <h1 className="text-2xl font-bold text-white tracking-tight">
                 {getServiceTypeName(agent.service_type)} Agent
               </h1>
               <TierBadge tier={agent.tier} />
             </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <span className="font-mono text-sm truncate max-w-[300px]">{agent.agent_id}</span>
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-sm text-gray-500 truncate max-w-[300px]">{agent.agent_id}</span>
               <button
                 onClick={handleCopyId}
-                className="text-gray-500 hover:text-white transition-all duration-200"
+                className="text-gray-600 hover:text-white transition-all duration-300 p-1 rounded-md hover:bg-white/[0.04]"
               >
                 {copied ? (
-                  <Check className="w-4 h-4 text-green-400 animate-scale-in" />
+                  <Check className="w-4 h-4 text-emerald-400 animate-scale-in" />
                 ) : (
                   <Copy className="w-4 h-4" />
                 )}
@@ -363,12 +391,13 @@ export default function AgentDetails() {
 
           <div className="flex items-center gap-3">
             <span
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium transition-all duration-300 ${
                 agent.is_active
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-gray-500/20 text-gray-400'
+                  ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                  : 'bg-gray-500/10 border border-gray-500/20 text-gray-400'
               }`}
             >
+              <span className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-emerald-500 animate-pulse-soft' : 'bg-gray-500'}`} />
               {agent.is_active ? 'Active' : 'Inactive'}
             </span>
           </div>
@@ -376,25 +405,32 @@ export default function AgentDetails() {
       </div>
 
       {/* Details Grid */}
-      <div className="grid md:grid-cols-2 gap-6 mb-6">
+      <div className="grid md:grid-cols-2 gap-5 mb-6">
         {/* Service Info */}
         <div
-          className="card opacity-0 animate-fade-in-up"
+          className="card card-shine opacity-0 animate-fade-in-up"
           style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}
         >
-          <h2 className="text-lg font-semibold text-white mb-4">Service Information</h2>
-          <dl className="space-y-3">
-            <div>
-              <dt className="text-sm text-gray-400">Service Type</dt>
-              <dd className="text-white font-medium">{getServiceTypeName(agent.service_type)}</dd>
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-blue-400" />
             </div>
-            <div>
-              <dt className="text-sm text-gray-400">Endpoint Hash</dt>
-              <dd className="text-white font-mono text-sm">{agent.endpoint_hash}</dd>
+            <h2 className="text-base font-semibold text-white">Service Information</h2>
+          </div>
+          <dl className="space-y-4">
+            <div className="flex items-center justify-between">
+              <dt className="text-xs text-gray-500 uppercase tracking-wider font-medium">Service Type</dt>
+              <dd className="text-white font-medium text-sm">{getServiceTypeName(agent.service_type)}</dd>
             </div>
-            <div>
-              <dt className="text-sm text-gray-400">Reputation Tier</dt>
-              <dd className="flex items-center gap-2">
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex items-center justify-between">
+              <dt className="text-xs text-gray-500 uppercase tracking-wider font-medium">Endpoint Hash</dt>
+              <dd className="text-gray-300 font-mono text-xs truncate max-w-[180px]">{agent.endpoint_hash}</dd>
+            </div>
+            <div className="border-t border-white/[0.04]" />
+            <div className="flex items-center justify-between">
+              <dt className="text-xs text-gray-500 uppercase tracking-wider font-medium">Reputation Tier</dt>
+              <dd>
                 <TierBadge tier={agent.tier} showLabel />
               </dd>
             </div>
@@ -403,66 +439,88 @@ export default function AgentDetails() {
 
         {/* Privacy Info */}
         <div
-          className="card opacity-0 animate-fade-in-up"
+          className="card card-shine opacity-0 animate-fade-in-up"
           style={{ animationDelay: '0.2s', animationFillMode: 'forwards' }}
         >
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <Shield className="w-5 h-5 text-shadow-400" />
-            Privacy-Preserving
-          </h2>
-          <p className="text-gray-400 text-sm mb-4">
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="w-8 h-8 rounded-lg bg-shadow-600/15 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-shadow-400" />
+            </div>
+            <h2 className="text-base font-semibold text-white">Privacy-Preserving</h2>
+          </div>
+          <p className="text-gray-400 text-sm mb-5 leading-relaxed">
             This agent's exact statistics are private. The tier badge represents a verified
             zero-knowledge proof of their reputation meeting certain thresholds.
           </p>
-          <ul className="space-y-2 text-sm">
-            {privacyChecks.map((check, index) => (
-              <li
-                key={index}
-                className="flex items-start gap-2 opacity-0 animate-slide-in-right"
-                style={{ animationDelay: `${0.3 + index * 0.1}s`, animationFillMode: 'forwards' }}
-              >
-                <span className="text-green-400 animate-scale-in" style={{ animationDelay: `${0.4 + index * 0.1}s` }}>
-                  ✓
-                </span>
-                <span className="text-gray-300">{check}</span>
-              </li>
-            ))}
+          <ul className="space-y-3">
+            {privacyChecks.map((check, index) => {
+              const CheckIcon = check.icon;
+              return (
+                <li
+                  key={index}
+                  className="flex items-start gap-2.5 opacity-0 animate-slide-in-right"
+                  style={{ animationDelay: `${0.3 + index * 0.1}s`, animationFillMode: 'forwards' }}
+                >
+                  <div className="w-5 h-5 rounded-md bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <CheckIcon className="w-3 h-3 text-emerald-400" />
+                  </div>
+                  <span className="text-gray-300 text-sm">{check.text}</span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>
 
-      {/* Action */}
+      {/* Action Card */}
       <div
         className="card opacity-0 animate-fade-in-up"
         style={{ animationDelay: '0.3s', animationFillMode: 'forwards' }}
       >
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Zap className="w-5 h-5 text-shadow-400" />
-          Hire This Agent
-        </h2>
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+            <Zap className="w-4 h-4 text-amber-400" />
+          </div>
+          <h2 className="text-base font-semibold text-white">Hire This Agent</h2>
+        </div>
 
         {!connected ? (
-          <div className="bg-gray-700/50 rounded-lg p-4 text-center">
-            <p className="text-gray-400 mb-4">Connect your wallet to hire this agent</p>
+          <div className="bg-surface-0/60 border border-white/[0.04] rounded-xl p-6 text-center">
+            <div className="w-10 h-10 rounded-xl bg-shadow-600/15 flex items-center justify-center mx-auto mb-3">
+              <Lock className="w-5 h-5 text-gray-500" />
+            </div>
+            <p className="text-gray-400 text-sm">Connect your wallet to hire this agent</p>
           </div>
         ) : !agent.is_active ? (
-          <div className="bg-gray-700/50 rounded-lg p-4 text-center">
-            <p className="text-gray-400">This agent is currently inactive</p>
+          <div className="bg-surface-0/60 border border-white/[0.04] rounded-xl p-6 text-center">
+            <div className="w-10 h-10 rounded-xl bg-gray-500/10 flex items-center justify-center mx-auto mb-3">
+              <AlertCircle className="w-5 h-5 text-gray-500" />
+            </div>
+            <p className="text-gray-400 text-sm">This agent is currently inactive</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            <p className="text-gray-400 text-sm">
+          <div className="space-y-5">
+            <p className="text-gray-400 text-sm leading-relaxed">
               When you make a request to this agent's endpoint, the x402 protocol will automatically:
             </p>
-            <ol className="list-decimal list-inside text-sm text-gray-300 space-y-2">
-              <li>Return payment terms (price, escrow details)</li>
-              <li>You create an escrow with locked payment</li>
-              <li>Agent delivers service and reveals secret</li>
-              <li>Escrow automatically releases payment</li>
-              <li>You can submit a rating (costs 0.5 credits burn)</li>
+            <ol className="space-y-2.5">
+              {[
+                'Return payment terms (price, escrow details)',
+                'You create an escrow with locked payment',
+                'Agent delivers service and reveals secret',
+                'Escrow automatically releases payment',
+                'You can submit a rating (costs 0.5 credits burn)',
+              ].map((step, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm">
+                  <span className="w-5 h-5 rounded-md bg-shadow-600/15 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-shadow-400">
+                    {i + 1}
+                  </span>
+                  <span className="text-gray-300">{step}</span>
+                </li>
+              ))}
             </ol>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 pt-1">
               <button
                 onClick={() => setShowRequestModal(true)}
                 className="btn btn-primary flex-1"
@@ -477,7 +535,7 @@ export default function AgentDetails() {
               </button>
             </div>
 
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-600 text-center">
               Note: The actual endpoint URL is encrypted. Only the agent can reveal it to verified clients.
             </p>
           </div>

@@ -1,9 +1,8 @@
-// Transaction hooks for real on-chain functions
+// Transaction hooks for real on-chain functions via Shield Wallet
 // Uses lazy SDK imports to avoid blocking React mount with WASM loading
 
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useShieldWallet } from '../providers/WalletProvider';
 import { useSDKStore } from '../stores/sdkStore';
 
 // Test transaction amounts: 0.01 credits = 10,000 microcredits
@@ -23,10 +22,10 @@ interface TransactionResult {
 
 /**
  * Hook for creating escrow transactions
- * Uses SDK's real transferPublic for on-chain transfers
+ * Uses Shield Wallet's signTransaction for direct on-chain execution
  */
 export function useEscrowTransaction() {
-  const { publicKey, requestTransaction } = useWallet();
+  const { publicKey, signTransaction } = useShieldWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -36,7 +35,7 @@ export function useEscrowTransaction() {
     _jobDescription: string = 'service-request'
   ): Promise<TransactionResult> => {
     if (!publicKey) {
-      return { success: false, error: 'Wallet not connected' };
+      return { success: false, error: 'Shield Wallet not connected' };
     }
 
     setIsLoading(true);
@@ -55,37 +54,29 @@ export function useEscrowTransaction() {
         };
       }
 
-      // Use Leo Wallet for transaction signing
-      if (requestTransaction) {
-        setStatus('Building transaction...');
+      // Use Shield Wallet for direct transaction signing
+      setStatus('Signing transaction with Shield Wallet...');
 
-        // Build transfer_public transaction for credits.aleo
-        const transaction = Transaction.createTransaction(
-          publicKey,
-          WalletAdapterNetwork.TestnetBeta,
-          'credits.aleo',
-          'transfer_public',
-          [agentAddress, `${amount}u64`],
-          TEST_FEE
-        );
+      const txId = await signTransaction(
+        'credits.aleo',
+        'transfer_public',
+        [agentAddress, `${amount}u64`],
+        TEST_FEE
+      );
 
-        setStatus('Waiting for wallet approval...');
-        const txId = await requestTransaction(transaction);
+      if (txId) {
+        setStatus('Transaction submitted! Waiting for confirmation...');
 
-        if (txId) {
-          setStatus('Transaction submitted! Waiting for confirmation...');
+        // Lazy import for waitForTransaction
+        const { waitForTransaction } = await import('@shadowagent/sdk');
+        const confirmation = await waitForTransaction(txId, 12, 5000);
 
-          // Lazy import for waitForTransaction
-          const { waitForTransaction } = await import('@shadowagent/sdk');
-          const confirmation = await waitForTransaction(txId, 12, 5000);
-
-          if (confirmation.confirmed) {
-            setStatus('Escrow confirmed!');
-            return { success: true, txId };
-          } else {
-            setStatus('Transaction submitted (confirmation pending)');
-            return { success: true, txId, error: confirmation.error };
-          }
+        if (confirmation.confirmed) {
+          setStatus('Escrow confirmed!');
+          return { success: true, txId };
+        } else {
+          setStatus('Transaction submitted (confirmation pending)');
+          return { success: true, txId, error: confirmation.error };
         }
       }
 
@@ -97,7 +88,7 @@ export function useEscrowTransaction() {
     } finally {
       setIsLoading(false);
     }
-  }, [publicKey, requestTransaction]);
+  }, [publicKey, signTransaction]);
 
   return { createEscrow, isLoading, status, setStatus };
 }
@@ -107,7 +98,7 @@ export function useEscrowTransaction() {
  * Uses SDK client for rating submission with credit burn
  */
 export function useRatingTransaction() {
-  const { publicKey } = useWallet();
+  const { publicKey } = useShieldWallet();
   const { getClient } = useSDKStore();
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -119,7 +110,7 @@ export function useRatingTransaction() {
     paymentAmount: number = TEST_AMOUNT
   ): Promise<TransactionResult> => {
     if (!publicKey) {
-      return { success: false, error: 'Wallet not connected' };
+      return { success: false, error: 'Shield Wallet not connected' };
     }
 
     if (rating < 1 || rating > 5) {
@@ -157,7 +148,7 @@ export function useRatingTransaction() {
  * Uses SDK's real getBalance function (lazy loaded)
  */
 export function useBalanceCheck() {
-  const { publicKey } = useWallet();
+  const { publicKey } = useShieldWallet();
   const [balance, setBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -187,7 +178,7 @@ export function useBalanceCheck() {
  * Uses SDK's createReputationProof for real ZK proofs (lazy loaded)
  */
 export function useReputationProof() {
-  const { publicKey } = useWallet();
+  const { publicKey } = useShieldWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -202,7 +193,7 @@ export function useReputationProof() {
     privateKey?: string
   ): Promise<{ success: boolean; proof?: string; error?: string }> => {
     if (!publicKey) {
-      return { success: false, error: 'Wallet not connected' };
+      return { success: false, error: 'Shield Wallet not connected' };
     }
 
     setIsLoading(true);
@@ -226,7 +217,10 @@ export function useReputationProof() {
         rating: reputation.totalRatingPoints,
       };
 
-      if (privateKey) {
+      // Use private key from env if not provided
+      const key = privateKey || import.meta.env.VITE_SHIELD_WALLET_PRIVATE_KEY;
+
+      if (key) {
         // Lazy import for createReputationProof
         const { createReputationProof } = await import('@shadowagent/sdk');
 
@@ -235,7 +229,7 @@ export function useReputationProof() {
           proofTypeMap[proofType],
           thresholds[proofType],
           reputation,
-          privateKey
+          key
         );
 
         setStatus('Proof generated!');
