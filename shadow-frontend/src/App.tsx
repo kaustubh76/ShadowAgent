@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage';
 import AgentDashboard from './pages/AgentDashboard';
 import ClientDashboard from './pages/ClientDashboard';
 import AgentDetails from './pages/AgentDetails';
+import DisputeCenter from './pages/DisputeCenter';
 import { ToastProvider } from './contexts/ToastContext';
 import { useSDKStore } from './stores/sdkStore';
 
@@ -114,6 +115,7 @@ function App() {
             <Route path="agent" element={<AgentDashboard />} />
             <Route path="client" element={<ClientDashboard />} />
             <Route path="agents/:agentId" element={<AgentDetails />} />
+            <Route path="disputes" element={<DisputeCenter />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

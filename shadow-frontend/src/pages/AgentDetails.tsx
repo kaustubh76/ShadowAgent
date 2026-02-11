@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users } from 'lucide-react';
 import { AgentListing, Tier, getServiceTypeName, getTierName } from '../stores/agentStore';
-import { getAgent, verifyReputationProof } from '../lib/api';
+import { getAgent, verifyReputationProof, submitDispute, submitRefund } from '../lib/api';
+import { useAgentStore } from '../stores/agentStore';
 import TierBadge from '../components/TierBadge';
 import { useWalletStore } from '../stores/walletStore';
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { useEscrowTransaction, useBalanceCheck } from '../hooks/useTransactions';
+import DisputeForm from '../components/DisputeForm';
+import PartialRefundModal from '../components/PartialRefundModal';
+import MultiSigEscrowForm from '../components/MultiSigEscrowForm';
+import MultiSigApprovalPanel from '../components/MultiSigApprovalPanel';
+import { useToast } from '../contexts/ToastContext';
 
 const privacyChecks = [
   { text: 'Job count verified (not revealed)', icon: Eye },
@@ -285,6 +291,17 @@ export default function AgentDetails() {
   const [error, setError] = useState<string | null>(null);
   const [showProofModal, setShowProofModal] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [showMultiSigForm, setShowMultiSigForm] = useState(false);
+  const [multiSigData, setMultiSigData] = useState<{
+    signers: [string, string, string];
+    approvals: [boolean, boolean, boolean];
+    requiredSigs: number;
+    sigCount: number;
+    status: 'locked' | 'released' | 'refunded';
+  } | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     async function fetchAgent() {
@@ -535,6 +552,42 @@ export default function AgentDetails() {
               </button>
             </div>
 
+            <div className="flex gap-3 pt-1 border-t border-white/[0.04] mt-2">
+              <button
+                onClick={() => setShowDisputeForm(true)}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-red-500/5 border border-red-500/20 text-red-300 hover:bg-red-500/10 hover:border-red-500/30 text-sm"
+              >
+                <AlertTriangle className="w-4 h-4" />
+                Open Dispute
+              </button>
+              <button
+                onClick={() => setShowRefundModal(true)}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-amber-500/5 border border-amber-500/20 text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 text-sm"
+              >
+                <SplitSquareHorizontal className="w-4 h-4" />
+                Propose Partial Refund
+              </button>
+              <button
+                onClick={() => setShowMultiSigForm(true)}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-blue-500/5 border border-blue-500/20 text-blue-300 hover:bg-blue-500/10 hover:border-blue-500/30 text-sm"
+              >
+                <Users className="w-4 h-4" />
+                Multi-Sig Escrow
+              </button>
+            </div>
+
+            {multiSigData && (
+              <div className="mt-2">
+                <MultiSigApprovalPanel
+                  signers={multiSigData.signers}
+                  approvals={multiSigData.approvals}
+                  requiredSigs={multiSigData.requiredSigs}
+                  sigCount={multiSigData.sigCount}
+                  status={multiSigData.status}
+                />
+              </div>
+            )}
+
             <p className="text-xs text-gray-600 text-center">
               Note: The actual endpoint URL is encrypted. Only the agent can reveal it to verified clients.
             </p>
@@ -548,6 +601,76 @@ export default function AgentDetails() {
       )}
       {showRequestModal && (
         <RequestServiceModal agent={agent} onClose={() => setShowRequestModal(false)} />
+      )}
+      {showDisputeForm && (
+        <DisputeForm
+          isOpen={showDisputeForm}
+          onClose={() => setShowDisputeForm(false)}
+          onSubmit={async (evidenceHash) => {
+            const { address } = useWalletStore.getState();
+            const result = await submitDispute({
+              agent: agent.agent_id,
+              client: address || 'unknown',
+              job_hash: `job_${agent.agent_id.slice(0, 8)}`,
+              escrow_amount: 10_000_000,
+              evidence_hash: evidenceHash,
+            });
+            if (result.success && result.dispute) {
+              toast.success('Dispute submitted successfully');
+              useAgentStore.getState().addDispute(result.dispute);
+              useAgentStore.getState().addTransaction({ type: 'dispute_opened', agentId: agent.agent_id, amount: 10_000_000 });
+            } else {
+              toast.error(result.error || 'Failed to submit dispute');
+            }
+          }}
+          agentAddress={agent.agent_id}
+          jobHash={`job_${agent.agent_id.slice(0, 8)}`}
+          escrowAmount={10_000_000}
+        />
+      )}
+      {showRefundModal && (
+        <PartialRefundModal
+          isOpen={showRefundModal}
+          onClose={() => setShowRefundModal(false)}
+          onSubmit={async (agentAmount) => {
+            const { address } = useWalletStore.getState();
+            const result = await submitRefund({
+              agent: agent.agent_id,
+              client: address || 'unknown',
+              total_amount: 10_000_000,
+              agent_amount: agentAmount,
+              job_hash: `job_${agent.agent_id.slice(0, 8)}`,
+            });
+            if (result.success && result.proposal) {
+              toast.success('Partial refund proposed successfully');
+              useAgentStore.getState().addPartialRefund(result.proposal);
+              useAgentStore.getState().addTransaction({ type: 'partial_refund_proposed', agentId: agent.agent_id, amount: 10_000_000 });
+            } else {
+              toast.error(result.error || 'Failed to propose refund');
+            }
+          }}
+          agentAddress={agent.agent_id}
+          jobHash={`job_${agent.agent_id.slice(0, 8)}`}
+          totalAmount={10_000_000}
+        />
+      )}
+      {showMultiSigForm && (
+        <MultiSigEscrowForm
+          isOpen={showMultiSigForm}
+          onClose={() => setShowMultiSigForm(false)}
+          onSubmit={async (signers, requiredSigs) => {
+            toast.success('Multi-sig escrow created');
+            setMultiSigData({
+              signers,
+              approvals: [false, false, false],
+              requiredSigs,
+              sigCount: 0,
+              status: 'locked',
+            });
+          }}
+          agentAddress={agent.agent_id}
+          amount={10_000_000}
+        />
       )}
     </div>
   );

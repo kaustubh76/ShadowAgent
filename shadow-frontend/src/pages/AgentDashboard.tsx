@@ -1,7 +1,7 @@
 // Agent Dashboard with Shield Wallet Integration
 
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Award, DollarSign, BarChart3, FileCheck, AlertCircle, Loader2, Copy, Check, Wallet } from 'lucide-react';
+import { Shield, Award, DollarSign, BarChart3, FileCheck, AlertCircle, Loader2, Copy, Check, Wallet, TrendingDown } from 'lucide-react';
 import { useShieldWallet } from '../providers/WalletProvider';
 import TierBadge from '../components/TierBadge';
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
@@ -702,6 +702,21 @@ export default function AgentDashboard() {
           );
         })}
       </div>
+
+      {/* Decay Warning Banner — shown when effective tier would be lower due to inactivity */}
+      {reputation && reputation.tier > Tier.New && (
+        <div className="bg-amber-500/5 border border-amber-500/15 rounded-xl p-4 flex items-start gap-3 animate-fade-in">
+          <TrendingDown className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-amber-300 font-medium">Reputation Decay Active</p>
+            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+              Inactive agents lose 5% of their effective rating every ~7 days. Complete jobs regularly to maintain your tier.
+              Your nominal tier is <span className="text-white font-medium">{getTierName(reputation.tier)}</span> —
+              use the companion program's decay-aware proof to verify your current effective rating on-chain.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="grid md:grid-cols-2 gap-5">

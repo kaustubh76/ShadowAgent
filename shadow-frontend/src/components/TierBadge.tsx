@@ -1,9 +1,10 @@
 import clsx from 'clsx';
 import { Tier } from '../stores/agentStore';
-import { Award, Star, Trophy, Gem } from 'lucide-react';
+import { Award, Star, Trophy, Gem, TrendingDown } from 'lucide-react';
 
 interface TierBadgeProps {
   tier: Tier;
+  effectiveTier?: Tier;
   size?: 'sm' | 'md' | 'lg';
   showLabel?: boolean;
 }
@@ -47,24 +48,35 @@ const sizeConfig = {
   lg: { badge: 'px-3 py-1.5 text-sm gap-1.5', icon: 'w-4 h-4' },
 };
 
-export default function TierBadge({ tier, size = 'md', showLabel = true }: TierBadgeProps) {
+export default function TierBadge({ tier, effectiveTier, size = 'md', showLabel = true }: TierBadgeProps) {
   const config = tierConfig[tier] || tierConfig[Tier.New];
   const sizes = sizeConfig[size];
   const Icon = config.icon;
+  const hasDecay = effectiveTier !== undefined && effectiveTier < tier;
 
   return (
-    <span
-      className={clsx(
-        'tier-badge inline-flex items-center rounded-full font-semibold transition-all duration-300 hover:scale-105',
-        config.className,
-        config.glowColor,
-        sizes.badge
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={clsx(
+          'tier-badge inline-flex items-center rounded-full font-semibold transition-all duration-300 hover:scale-105',
+          config.className,
+          config.glowColor,
+          sizes.badge
+        )}
+        role="status"
+        aria-label={`Agent tier: ${config.label}${hasDecay ? ` (effective: ${tierConfig[effectiveTier]?.label || 'New'})` : ''}`}
+      >
+        <Icon className={sizes.icon} />
+        {showLabel && <span>{config.label}</span>}
+      </span>
+      {hasDecay && (
+        <span
+          className="inline-flex items-center gap-0.5 text-[10px] text-amber-400"
+          title={`Effective tier: ${tierConfig[effectiveTier]?.label || 'New'} (due to inactivity decay)`}
+        >
+          <TrendingDown className="w-3 h-3" />
+        </span>
       )}
-      role="status"
-      aria-label={`Agent tier: ${config.label}`}
-    >
-      <Icon className={sizes.icon} />
-      {showLabel && <span>{config.label}</span>}
     </span>
   );
 }
