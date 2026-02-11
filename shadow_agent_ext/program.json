@@ -1,0 +1,6 @@
+{
+  "program": "shadow_agent_ext.aleo",
+  "version": "0.1.0",
+  "description": "ShadowAgent extension: dispute resolution, partial refunds, reputation decay, multi-sig escrow",
+  "license": "MIT"
+}
