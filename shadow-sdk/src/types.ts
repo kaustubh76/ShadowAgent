@@ -44,6 +44,26 @@ export enum EscrowStatus {
 }
 
 /**
+ * Dispute status (matches shadow_agent_ext.aleo)
+ */
+export enum DisputeStatus {
+  Opened = 0,
+  AgentResponded = 1,
+  ResolvedClient = 2,
+  ResolvedAgent = 3,
+  ResolvedSplit = 4,
+}
+
+/**
+ * Partial refund status (matches shadow_agent_ext.aleo)
+ */
+export enum RefundStatus {
+  Proposed = 0,
+  Accepted = 1,
+  Rejected = 2,
+}
+
+/**
  * Agent listing information
  */
 export interface AgentListing {
@@ -256,3 +276,81 @@ export const RATING_CONSTANTS = {
   MAX_RATING: 50, // 5.0 stars (scaled x10)
   MIN_RATING: 1, // 0.1 stars
 } as const;
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 10a: Extension Types (shadow_agent_ext.aleo)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Partial refund proposal between client and agent
+ */
+export interface PartialRefundProposal {
+  agent: string;
+  client: string;
+  total_amount: number;
+  agent_amount: number;
+  client_amount: number;
+  job_hash: string;
+  status: RefundStatus;
+}
+
+/**
+ * Dispute record between client and agent
+ */
+export interface Dispute {
+  client: string;
+  agent: string;
+  job_hash: string;
+  escrow_amount: number;
+  client_evidence_hash: string;
+  agent_evidence_hash: string;
+  status: DisputeStatus;
+  resolution_agent_pct: number;
+  opened_at: number;
+}
+
+/**
+ * Decayed reputation data (after time-based decay applied)
+ */
+export interface DecayedReputation {
+  effective_rating_points: number;
+  decay_periods: number;
+  decay_factor: number; // 0.95^periods
+  effective_average_rating: number;
+  effective_tier: Tier;
+}
+
+/**
+ * Reputation decay constants (matching shadow_agent_ext.aleo)
+ */
+export const DECAY_CONSTANTS = {
+  PERIOD_BLOCKS: 100_800, // ~7 days at 6s/block
+  FACTOR_NUMERATOR: 95,
+  FACTOR_DENOMINATOR: 100,
+  MAX_STEPS: 10, // Cap at ~70 days
+} as const;
+
+/**
+ * Multi-sig escrow configuration
+ */
+export interface MultiSigEscrowConfig {
+  signers: [string, string, string]; // Fixed 3 addresses
+  required_signatures: 1 | 2 | 3;
+}
+
+/**
+ * Multi-sig escrow record
+ */
+export interface MultiSigEscrow {
+  owner: string;
+  agent: string;
+  amount: number;
+  job_hash: string;
+  deadline: number;
+  secret_hash: string;
+  signers: [string, string, string];
+  required_sigs: number;
+  sig_count: number;
+  approvals: [boolean, boolean, boolean];
+  status: EscrowStatus;
+}

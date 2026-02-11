@@ -11,6 +11,10 @@ import {
   RequestOptions,
   RequestResult,
   VerificationResult,
+  PartialRefundProposal,
+  Dispute,
+  MultiSigEscrowConfig,
+  MultiSigEscrow,
 } from './types';
 import {
   generateSecret,
@@ -24,6 +28,8 @@ import {
   getBalance,
   getAddress,
   waitForTransaction,
+  executeProgram,
+  SHADOW_AGENT_EXT_PROGRAM,
 } from './crypto';
 
 // Rating burn cost in microcredits (0.5 credits)
@@ -548,6 +554,268 @@ export class ShadowAgentClient {
     }
     if (updates.timeout !== undefined) {
       this.config.timeout = updates.timeout;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Partial Refunds
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Propose a partial refund split on an escrow
+   * The agent must accept before fund transfers occur
+   */
+  async proposePartialRefund(
+    agent: string,
+    totalAmount: number,
+    agentAmount: number,
+    jobHash: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (agentAmount > totalAmount) {
+      return { success: false, error: 'Agent amount cannot exceed total amount' };
+    }
+
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for partial refund proposal' };
+    }
+
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'propose_partial_refund',
+        [agent, `${totalAmount}u64`, `${agentAmount}u64`, jobHash],
+      );
+
+      return { success: true, txId };
+    } catch (error) {
+      // Fallback to facilitator
+      try {
+        const url = `${this.config.facilitatorUrl}/refunds`;
+        const response = await this.fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent,
+            total_amount: totalAmount,
+            agent_amount: agentAmount,
+            job_hash: jobHash,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: errorData.error || 'Partial refund proposal failed' };
+        }
+
+        const result = await response.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch (facilitatorError) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Partial refund proposal failed',
+        };
+      }
+    }
+  }
+
+  /**
+   * Get the status of a partial refund proposal
+   */
+  async getPartialRefundStatus(jobHash: string): Promise<PartialRefundProposal | null> {
+    try {
+      const url = `${this.config.facilitatorUrl}/refunds/${jobHash}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<PartialRefundProposal>;
+    } catch {
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Dispute Resolution
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Open a dispute on a job/escrow
+   */
+  async openDispute(
+    agent: string,
+    jobHash: string,
+    escrowAmount: number,
+    evidenceHash: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to open a dispute' };
+    }
+
+    try {
+      // TODO: admin address should be configurable
+      const adminAddress = 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'open_dispute',
+        [agent, jobHash, `${escrowAmount}u64`, evidenceHash, adminAddress],
+      );
+
+      return { success: true, txId };
+    } catch (error) {
+      // Fallback to facilitator
+      try {
+        const url = `${this.config.facilitatorUrl}/disputes`;
+        const response = await this.fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent,
+            job_hash: jobHash,
+            escrow_amount: escrowAmount,
+            evidence_hash: evidenceHash,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: errorData.error || 'Failed to open dispute' };
+        }
+
+        const result = await response.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to open dispute',
+        };
+      }
+    }
+  }
+
+  /**
+   * Get the status of a dispute
+   */
+  async getDisputeStatus(jobHash: string): Promise<Dispute | null> {
+    try {
+      const url = `${this.config.facilitatorUrl}/disputes/${jobHash}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<Dispute>;
+    } catch {
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Multi-Sig Escrow
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Create a multi-sig escrow requiring M-of-3 approvals
+   */
+  async createMultiSigEscrow(
+    agent: string,
+    amount: number,
+    jobHash: string,
+    deadline: number,
+    config: MultiSigEscrowConfig
+  ): Promise<{ success: boolean; txId?: string; secretHash?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for multi-sig escrow' };
+    }
+
+    const secret = generateSecret();
+    const secretHash = await hashSecret(secret);
+
+    // Store secret for later use
+    this.escrowSecrets.set(jobHash, secret);
+
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'create_multisig_escrow',
+        [
+          agent,
+          `${amount}u64`,
+          jobHash,
+          secretHash,
+          `${deadline}u64`,
+          config.signers[0],
+          config.signers[1],
+          config.signers[2],
+          `${config.required_signatures}u8`,
+        ],
+      );
+
+      return { success: true, txId, secretHash };
+    } catch (error) {
+      // Fallback to facilitator
+      try {
+        const url = `${this.config.facilitatorUrl}/escrows/multisig`;
+        const response = await this.fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent,
+            amount,
+            job_hash: jobHash,
+            secret_hash: secretHash,
+            deadline,
+            signers: config.signers,
+            required_signatures: config.required_signatures,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: errorData.error || 'Multi-sig escrow creation failed' };
+        }
+
+        const result = await response.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id, secretHash };
+      } catch {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Multi-sig escrow creation failed',
+        };
+      }
+    }
+  }
+
+  /**
+   * Get the status of a multi-sig escrow
+   */
+  async getMultiSigEscrowStatus(jobHash: string): Promise<MultiSigEscrow | null> {
+    try {
+      const url = `${this.config.facilitatorUrl}/escrows/multisig/${jobHash}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<MultiSigEscrow>;
+    } catch {
+      return null;
     }
   }
 }

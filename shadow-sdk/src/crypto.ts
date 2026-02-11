@@ -3,8 +3,9 @@
 // Static imports cause "RuntimeError: memory access out of bounds" in browser
 // because WASM memory isn't ready at bundle parse time.
 
-// Program ID for ShadowAgent
+// Program IDs for ShadowAgent
 export const SHADOW_AGENT_PROGRAM = 'shadow_agent.aleo';
+export const SHADOW_AGENT_EXT_PROGRAM = 'shadow_agent_ext.aleo';
 
 // --- Lazy SDK loader (defers WASM until runtime) ---
 
@@ -657,6 +658,67 @@ export async function executeProgram(
   });
 
   return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Reputation Decay Utilities
+// ═══════════════════════════════════════════════════════════════════
+
+const DECAY_PERIOD_BLOCKS = 100_800; // ~7 days at 6s/block
+const DECAY_FACTOR = 0.95; // 95% retained per period
+const MAX_DECAY_STEPS = 10;
+
+/**
+ * Calculate decayed reputation rating (client-side display calculation)
+ * Mirrors the on-chain apply_decay function from shadow_agent_ext.aleo
+ */
+export function calculateDecayedRating(
+  totalRatingPoints: number,
+  lastUpdated: number,
+  currentBlock: number
+): { effectivePoints: number; decayPeriods: number; decayFactor: number } {
+  const elapsed = currentBlock - lastUpdated;
+  const periods = Math.floor(elapsed / DECAY_PERIOD_BLOCKS);
+  const capped = Math.min(periods, MAX_DECAY_STEPS);
+
+  // Apply stepped decay matching the on-chain integer math
+  let result = totalRatingPoints;
+  for (let i = 0; i < capped; i++) {
+    result = Math.floor((result * 95) / 100);
+  }
+
+  return {
+    effectivePoints: result,
+    decayPeriods: capped,
+    decayFactor: Math.pow(DECAY_FACTOR, capped),
+  };
+}
+
+/**
+ * Estimate how many decay periods have elapsed since last activity
+ */
+export function estimateDecayPeriods(
+  lastUpdated: number,
+  currentBlock: number
+): number {
+  const elapsed = currentBlock - lastUpdated;
+  return Math.min(Math.floor(elapsed / DECAY_PERIOD_BLOCKS), MAX_DECAY_STEPS);
+}
+
+/**
+ * Calculate effective tier after decay
+ * Tier depends on jobs + revenue (not rating), so tier itself doesn't decay.
+ * But effective rating may be displayed alongside tier.
+ */
+export function calculateEffectiveTier(
+  jobs: number,
+  revenue: number
+): number {
+  if (jobs >= 1000 && revenue >= 10_000_000_000) return 4; // Diamond
+  if (jobs >= 200 && revenue >= 1_000_000_000) return 3;   // Gold
+  if (jobs >= 50 && revenue >= 100_000_000) return 2;       // Silver
+  if (jobs >= 10 && revenue >= 10_000_000) return 1;        // Bronze
+  return 0; // New
 }
 
 /**

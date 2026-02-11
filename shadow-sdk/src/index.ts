@@ -35,6 +35,15 @@ export {
   // Constants
   TIER_THRESHOLDS,
   RATING_CONSTANTS,
+  // Phase 10a: New feature types
+  DisputeStatus,
+  RefundStatus,
+  PartialRefundProposal,
+  Dispute,
+  DecayedReputation,
+  DECAY_CONSTANTS,
+  MultiSigEscrowConfig,
+  MultiSigEscrow,
 } from './types';
 
 // Crypto utilities
@@ -69,6 +78,11 @@ export {
   executeCreditsProgram,
   executeProgram,
   waitForTransaction,
+  // Phase 10a: Extension program & decay utilities
+  SHADOW_AGENT_EXT_PROGRAM,
+  calculateDecayedRating,
+  estimateDecayPeriods,
+  calculateEffectiveTier,
 } from './crypto';
 
 // Version

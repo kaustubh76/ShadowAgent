@@ -11,6 +11,9 @@ import {
   Tier,
   PaymentTerms,
   EscrowProof,
+  PartialRefundProposal,
+  Dispute,
+  DecayedReputation,
 } from './types';
 import {
   generateAgentId,
@@ -20,6 +23,10 @@ import {
   createReputationProof,
   encodeBase64,
   decodeBase64,
+  executeProgram,
+  getBlockHeight,
+  calculateDecayedRating,
+  SHADOW_AGENT_EXT_PROGRAM,
 } from './crypto';
 
 const DEFAULT_FACILITATOR_URL = 'http://localhost:3000';
@@ -467,6 +474,254 @@ export class ShadowAgentServer {
    */
   setReputation(reputation: AgentReputation): void {
     this.reputation = reputation;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Partial Refunds
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Accept a partial refund proposal from a client
+   */
+  async acceptPartialRefund(
+    jobHash: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/accept`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: this.agentId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Failed to accept refund' };
+      }
+
+      const result = await response.json() as { tx_id?: string };
+      return { success: true, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to accept refund',
+      };
+    }
+  }
+
+  /**
+   * Get pending partial refund proposals
+   */
+  async getPendingRefundProposals(): Promise<PartialRefundProposal[]> {
+    try {
+      await this.ensureAgentId();
+      const url = `${this.config.facilitatorUrl}/refunds?agent_id=${this.agentId}&status=proposed`;
+      const response = await fetch(url);
+
+      if (!response.ok) return [];
+      return response.json() as Promise<PartialRefundProposal[]>;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Reject a partial refund proposal
+   */
+  async rejectPartialRefund(
+    jobHash: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/reject`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: this.agentId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Failed to reject refund' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to reject refund',
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Dispute Resolution
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Respond to a dispute with counter-evidence
+   */
+  async respondToDispute(
+    jobHash: string,
+    evidenceHash: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/disputes/${jobHash}/respond`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: this.agentId,
+          evidence_hash: evidenceHash,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Failed to respond to dispute' };
+      }
+
+      const result = await response.json() as { tx_id?: string };
+      return { success: true, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to respond to dispute',
+      };
+    }
+  }
+
+  /**
+   * Get all open disputes against this agent
+   */
+  async getOpenDisputes(): Promise<Dispute[]> {
+    try {
+      await this.ensureAgentId();
+      const url = `${this.config.facilitatorUrl}/disputes?agent_id=${this.agentId}&status=open`;
+      const response = await fetch(url);
+
+      if (!response.ok) return [];
+      return response.json() as Promise<Dispute[]>;
+    } catch {
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Reputation Decay
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Get reputation with decay applied (client-side calculation)
+   */
+  async getReputationWithDecay(): Promise<DecayedReputation | null> {
+    if (!this.reputation) return null;
+
+    try {
+      const currentBlock = await getBlockHeight();
+      const { effectivePoints, decayPeriods, decayFactor } = calculateDecayedRating(
+        this.reputation.total_rating_points,
+        this.reputation.last_updated,
+        currentBlock
+      );
+
+      const effectiveAvgRating = this.reputation.total_jobs > 0
+        ? (effectivePoints * 10) / this.reputation.total_jobs
+        : 0;
+
+      const effectiveTier = this.calculateTier(
+        this.reputation.total_jobs,
+        this.reputation.total_revenue
+      );
+
+      return {
+        effective_rating_points: effectivePoints,
+        decay_periods: decayPeriods,
+        decay_factor: decayFactor,
+        effective_average_rating: effectiveAvgRating,
+        effective_tier: effectiveTier,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Generate a reputation proof with decay applied (on-chain)
+   */
+  async proveReputationWithDecay(
+    proofType: ProofType,
+    threshold: number
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!this.reputation) {
+      return { success: false, error: 'No reputation data available' };
+    }
+
+    try {
+      const currentBlock = await getBlockHeight();
+      const functionName = proofType === ProofType.Tier
+        ? 'prove_tier_with_decay'
+        : 'prove_rating_decay';
+
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        functionName,
+        [
+          `${this.reputation.agent_id}field`,
+          `${this.reputation.total_jobs}u64`,
+          `${this.reputation.total_rating_points}u64`,
+          `${this.reputation.total_revenue}u64`,
+          `${this.reputation.tier}u8`,
+          `${this.reputation.last_updated}u64`,
+          `${threshold}u8`,
+          `${currentBlock}u64`,
+        ],
+      );
+
+      return { success: true, txId };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to generate decayed proof',
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Multi-Sig Escrow
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Approve a multi-sig escrow release
+   */
+  async approveMultiSigEscrow(
+    jobHash: string,
+    secret: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/escrows/multisig/${jobHash}/approve`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: this.agentId,
+          secret,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Failed to approve escrow' };
+      }
+
+      const result = await response.json() as { tx_id?: string };
+      return { success: true, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to approve escrow',
+      };
+    }
   }
 }
 
