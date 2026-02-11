@@ -2,7 +2,7 @@
 // Uses SDK client when available, falls back to direct fetch
 
 import { useSDKStore } from '../stores/sdkStore';
-import type { AgentListing, SearchFilters } from '../stores/agentStore';
+import type { AgentListing, SearchFilters, DisputeInfo, RefundInfo } from '../stores/agentStore';
 
 // Local type definitions (mirrors SDK to avoid WASM import chain)
 interface SearchParams {
@@ -218,4 +218,122 @@ export async function getReadiness(): Promise<HealthStatus> {
   }
 
   return response.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 10a: Disputes, Refunds, Multi-Sig Escrow
+// ═══════════════════════════════════════════════════════════════════
+
+// Fetch disputes from facilitator
+export async function fetchDisputes(
+  params?: { client?: string; agent_id?: string; status?: string }
+): Promise<DisputeInfo[]> {
+  if (!FACILITATOR_ENABLED) return [];
+
+  try {
+    const searchParams = new URLSearchParams();
+    if (params?.client) searchParams.set('client', params.client);
+    if (params?.agent_id) searchParams.set('agent_id', params.agent_id);
+    if (params?.status) searchParams.set('status', params.status);
+
+    const qs = searchParams.toString();
+    const response = await fetch(`${API_BASE}/disputes${qs ? `?${qs}` : ''}`);
+
+    if (!response.ok) return [];
+    return response.json();
+  } catch {
+    return [];
+  }
+}
+
+// Submit a new dispute
+export async function submitDispute(data: {
+  agent: string;
+  client: string;
+  job_hash: string;
+  escrow_amount: number;
+  evidence_hash: string;
+}): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/disputes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to submit dispute' };
+    }
+
+    return { success: true, dispute: body.dispute };
+  } catch {
+    return { success: false, error: 'Network error submitting dispute' };
+  }
+}
+
+// Fetch partial refund proposals
+export async function fetchRefunds(
+  params?: { agent_id?: string; status?: string }
+): Promise<RefundInfo[]> {
+  if (!FACILITATOR_ENABLED) return [];
+
+  try {
+    const searchParams = new URLSearchParams();
+    if (params?.agent_id) searchParams.set('agent_id', params.agent_id);
+    if (params?.status) searchParams.set('status', params.status);
+
+    const qs = searchParams.toString();
+    const response = await fetch(`${API_BASE}/refunds${qs ? `?${qs}` : ''}`);
+
+    if (!response.ok) return [];
+    return response.json();
+  } catch {
+    return [];
+  }
+}
+
+// Submit a partial refund proposal
+export async function submitRefund(data: {
+  agent: string;
+  client: string;
+  total_amount: number;
+  agent_amount: number;
+  job_hash: string;
+}): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/refunds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to submit refund' };
+    }
+
+    return { success: true, proposal: body.proposal };
+  } catch {
+    return { success: false, error: 'Network error submitting refund' };
+  }
+}
+
+// Fetch multi-sig escrow status
+export async function fetchMultiSigEscrow(jobHash: string): Promise<Record<string, unknown> | null> {
+  if (!FACILITATOR_ENABLED) return null;
+
+  try {
+    const response = await fetch(`${API_BASE}/escrows/multisig/${jobHash}`);
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
 }

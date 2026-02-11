@@ -38,6 +38,27 @@ export interface SearchFilters {
   is_active?: boolean;
 }
 
+// Phase 10a: Dispute and Refund types
+export interface DisputeInfo {
+  client: string;
+  agent: string;
+  job_hash: string;
+  escrow_amount: number;
+  status: 'opened' | 'agent_responded' | 'resolved_client' | 'resolved_agent' | 'resolved_split';
+  resolution_agent_pct: number;
+  opened_at: string;
+}
+
+export interface RefundInfo {
+  agent: string;
+  client: string;
+  total_amount: number;
+  agent_amount: number;
+  client_amount: number;
+  job_hash: string;
+  status: 'proposed' | 'accepted' | 'rejected';
+}
+
 interface AgentState {
   // Agent mode (for service providers)
   isRegistered: boolean;
@@ -49,6 +70,15 @@ interface AgentState {
     tier: Tier;
   } | null;
 
+  // Phase 10a: Decay-aware reputation
+  effectiveRating: number | null;
+  decayPeriods: number;
+  effectiveTier: Tier | null;
+
+  // Phase 10a: Disputes and refunds
+  disputes: DisputeInfo[];
+  partialRefunds: RefundInfo[];
+
   // Client mode (for consumers)
   searchResults: AgentListing[];
   selectedAgent: AgentListing | null;
@@ -58,7 +88,7 @@ interface AgentState {
   // Transaction history
   transactions: Array<{
     id: string;
-    type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted';
+    type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted' | 'dispute_opened' | 'dispute_resolved' | 'partial_refund_proposed' | 'partial_refund_accepted';
     agentId: string;
     amount?: number;
     timestamp: number;
@@ -67,12 +97,19 @@ interface AgentState {
   // Actions - Agent
   setRegistered: (isRegistered: boolean, agentId?: string) => void;
   setReputation: (reputation: AgentState['reputation']) => void;
+  setDecayInfo: (effectiveRating: number, decayPeriods: number, effectiveTier: Tier) => void;
 
   // Actions - Client
   setSearchResults: (results: AgentListing[]) => void;
   selectAgent: (agent: AgentListing | null) => void;
   setFilters: (filters: SearchFilters) => void;
   setSearching: (isSearching: boolean) => void;
+
+  // Actions - Disputes & Refunds
+  setDisputes: (disputes: DisputeInfo[]) => void;
+  addDispute: (dispute: DisputeInfo) => void;
+  setPartialRefunds: (refunds: RefundInfo[]) => void;
+  addPartialRefund: (refund: RefundInfo) => void;
 
   // Actions - Transactions
   addTransaction: (transaction: Omit<AgentState['transactions'][0], 'id' | 'timestamp'>) => void;
@@ -84,6 +121,11 @@ export const useAgentStore = create<AgentState>((set) => ({
   isRegistered: false,
   agentId: null,
   reputation: null,
+  effectiveRating: null,
+  decayPeriods: 0,
+  effectiveTier: null,
+  disputes: [],
+  partialRefunds: [],
   searchResults: [],
   selectedAgent: null,
   filters: { is_active: true },
@@ -96,6 +138,9 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setReputation: (reputation) => set({ reputation }),
 
+  setDecayInfo: (effectiveRating, decayPeriods, effectiveTier) =>
+    set({ effectiveRating, decayPeriods, effectiveTier }),
+
   // Client actions
   setSearchResults: (results) => set({ searchResults: results }),
 
@@ -104,6 +149,17 @@ export const useAgentStore = create<AgentState>((set) => ({
   setFilters: (filters) => set({ filters }),
 
   setSearching: (isSearching) => set({ isSearching }),
+
+  // Disputes & Refunds actions
+  setDisputes: (disputes) => set({ disputes }),
+
+  addDispute: (dispute) =>
+    set((state) => ({ disputes: [dispute, ...state.disputes] })),
+
+  setPartialRefunds: (refunds) => set({ partialRefunds: refunds }),
+
+  addPartialRefund: (refund) =>
+    set((state) => ({ partialRefunds: [refund, ...state.partialRefunds] })),
 
   // Transaction actions
   addTransaction: (transaction) =>

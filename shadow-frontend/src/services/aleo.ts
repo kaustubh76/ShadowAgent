@@ -148,6 +148,9 @@ export const credits = {
 // Program ID for ShadowAgent smart contract
 export const SHADOW_AGENT_PROGRAM_ID = 'shadow_agent.aleo';
 
+// Companion program for Phase 10a features (disputes, partial refunds, decay, multi-sig)
+export const SHADOW_AGENT_EXT_PROGRAM_ID = 'shadow_agent_ext.aleo';
+
 // Network configuration
 export const ALEO_NETWORK = 'testnet' as const;
 export const ALEO_RPC_URL = 'https://api.explorer.provable.com/v1';
