@@ -10,6 +10,9 @@ import { createLogger, format, transports } from 'winston';
 import agentsRouter from './routes/agents';
 import verifyRouter from './routes/verify';
 import healthRouter from './routes/health';
+import refundsRouter from './routes/refunds';
+import disputesRouter from './routes/disputes';
+import multisigRouter from './routes/multisig';
 import { x402Middleware } from './middleware/x402';
 import { indexerService } from './services/indexer';
 
@@ -76,6 +79,9 @@ app.use((req, res, next) => {
 app.use('/health', healthRouter);
 app.use('/agents', agentsRouter);
 app.use('/verify', verifyRouter);
+app.use('/refunds', refundsRouter);
+app.use('/disputes', disputesRouter);
+app.use('/escrows/multisig', multisigRouter);
 
 // x402 protected example endpoint
 app.use('/api', x402Middleware({ pricePerRequest: 100000 }));
