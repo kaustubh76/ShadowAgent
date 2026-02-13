@@ -13,6 +13,7 @@ import healthRouter from './routes/health';
 import refundsRouter from './routes/refunds';
 import disputesRouter from './routes/disputes';
 import multisigRouter from './routes/multisig';
+import sessionsRouter from './routes/sessions';
 import { x402Middleware } from './middleware/x402';
 import { indexerService } from './services/indexer';
 
@@ -82,6 +83,7 @@ app.use('/verify', verifyRouter);
 app.use('/refunds', refundsRouter);
 app.use('/disputes', disputesRouter);
 app.use('/escrows/multisig', multisigRouter);
+app.use('/sessions', sessionsRouter);
 
 // x402 protected example endpoint
 app.use('/api', x402Middleware({ pricePerRequest: 100000 }));
