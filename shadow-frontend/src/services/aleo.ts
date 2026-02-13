@@ -252,12 +252,12 @@ export async function isNullifierUsed(nullifier: string): Promise<boolean> {
 /**
  * Build register_agent transaction inputs for Shield Wallet
  */
-export function buildRegisterAgentInputs(
+export async function buildRegisterAgentInputs(
   serviceType: number,
   endpointUrl: string,
   bondAmount: number = REGISTRATION_BOND
-): RegisterAgentInput {
-  const endpointHash = hashToField(endpointUrl);
+): Promise<RegisterAgentInput> {
+  const endpointHash = await hashToField(endpointUrl);
 
   return {
     service_type: serviceType,
@@ -269,13 +269,13 @@ export function buildRegisterAgentInputs(
 /**
  * Build submit_rating transaction inputs for Shield Wallet
  */
-export function buildSubmitRatingInputs(
+export async function buildSubmitRatingInputs(
   agentId: string,
   rating: number,
   paymentAmount: number,
   nullifierSeed: string
-): SubmitRatingInput {
-  const nullifier = hashToField(`nullifier:${nullifierSeed}:${agentId}`);
+): Promise<SubmitRatingInput> {
+  const nullifier = await hashToField(`nullifier:${nullifierSeed}:${agentId}`);
 
   return {
     agent_id: agentId,
@@ -288,15 +288,15 @@ export function buildSubmitRatingInputs(
 /**
  * Build create_escrow transaction inputs for Shield Wallet
  */
-export function buildCreateEscrowInputs(
+export async function buildCreateEscrowInputs(
   agentAddress: string,
   amount: number,
   jobData: string,
   deadlineBlocks: number,
   secret: string
-): CreateEscrowInput {
-  const jobHash = hashToField(jobData);
-  const secretHash = hashToField(secret);
+): Promise<CreateEscrowInput> {
+  const jobHash = await hashToField(jobData);
+  const secretHash = await hashToField(secret);
 
   return {
     agent: agentAddress,
@@ -366,16 +366,14 @@ function parseAgentListing(data: string): AgentListing | null {
 }
 
 /**
- * Simple hash function for creating field values
- * Used for Shield Wallet transaction inputs
+ * SHA-256 based hash for creating field values
+ * Produces a 62-bit integer from the first 8 bytes of a SHA-256 digest
  */
-function hashToField(data: string): string {
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  const fieldValue = Math.abs(hash) % (2 ** 30);
-  return fieldValue.toString();
+async function hashToField(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(data));
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hex = hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+  const value = BigInt('0x' + hex) % (2n ** 62n);
+  return value.toString();
 }
