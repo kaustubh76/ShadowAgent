@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users, Star } from 'lucide-react';
 import { AgentListing, Tier, getServiceTypeName, getTierName } from '../stores/agentStore';
-import { getAgent, verifyReputationProof, submitDispute, submitRefund } from '../lib/api';
+import { getAgent, verifyReputationProof, submitDispute, submitRefund, createMultiSigEscrow, approveMultiSigEscrow, submitRating } from '../lib/api';
 import { useAgentStore } from '../stores/agentStore';
 import TierBadge from '../components/TierBadge';
 import { useWalletStore } from '../stores/walletStore';
@@ -12,6 +12,8 @@ import DisputeForm from '../components/DisputeForm';
 import PartialRefundModal from '../components/PartialRefundModal';
 import MultiSigEscrowForm from '../components/MultiSigEscrowForm';
 import MultiSigApprovalPanel from '../components/MultiSigApprovalPanel';
+import RatingForm from '../components/RatingForm';
+import SessionManager from '../components/SessionManager';
 import { useToast } from '../contexts/ToastContext';
 
 const privacyChecks = [
@@ -294,7 +296,10 @@ export default function AgentDetails() {
   const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [showMultiSigForm, setShowMultiSigForm] = useState(false);
+  const [showRatingForm, setShowRatingForm] = useState(false);
+  const [showSessionManager, setShowSessionManager] = useState(false);
   const [multiSigData, setMultiSigData] = useState<{
+    jobHash: string;
     signers: [string, string, string];
     approvals: [boolean, boolean, boolean];
     requiredSigs: number;
@@ -545,6 +550,13 @@ export default function AgentDetails() {
                 Request Service
               </button>
               <button
+                onClick={() => setShowSessionManager(true)}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20 hover:border-amber-500/30 text-sm font-medium"
+              >
+                <Zap className="w-4 h-4" />
+                Session Payment
+              </button>
+              <button
                 onClick={() => setShowProofModal(true)}
                 className="btn btn-outline"
               >
@@ -574,6 +586,13 @@ export default function AgentDetails() {
                 <Users className="w-4 h-4" />
                 Multi-Sig Escrow
               </button>
+              <button
+                onClick={() => setShowRatingForm(true)}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-yellow-500/5 border border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/10 hover:border-yellow-500/30 text-sm"
+              >
+                <Star className="w-4 h-4" />
+                Submit Rating
+              </button>
             </div>
 
             {multiSigData && (
@@ -584,6 +603,23 @@ export default function AgentDetails() {
                   requiredSigs={multiSigData.requiredSigs}
                   sigCount={multiSigData.sigCount}
                   status={multiSigData.status}
+                  currentUserAddress={useWalletStore.getState().address || undefined}
+                  onApprove={async (signerAddress) => {
+                    const result = await approveMultiSigEscrow(multiSigData.jobHash, signerAddress);
+                    if (result.success && result.escrow) {
+                      toast.success(result.threshold_met ? 'Escrow released!' : 'Approval recorded');
+                      setMultiSigData({
+                        jobHash: multiSigData.jobHash,
+                        signers: result.escrow.signers,
+                        approvals: result.escrow.approvals,
+                        requiredSigs: result.escrow.required_sigs,
+                        sigCount: result.escrow.sig_count,
+                        status: result.escrow.status,
+                      });
+                    } else {
+                      toast.error(result.error || 'Failed to approve');
+                    }
+                  }}
                 />
               </div>
             )}
@@ -659,17 +695,59 @@ export default function AgentDetails() {
           isOpen={showMultiSigForm}
           onClose={() => setShowMultiSigForm(false)}
           onSubmit={async (signers, requiredSigs) => {
-            toast.success('Multi-sig escrow created');
-            setMultiSigData({
+            const { address } = useWalletStore.getState();
+            const jobHash = `job_msig_${Date.now()}`;
+            const result = await createMultiSigEscrow({
+              agent: agent.agent_id,
+              owner: address || 'unknown',
+              amount: 10_000_000,
+              job_hash: jobHash,
+              secret_hash: `secret_${jobHash}`,
               signers,
-              approvals: [false, false, false],
-              requiredSigs,
-              sigCount: 0,
-              status: 'locked',
+              required_signatures: requiredSigs,
             });
+            if (result.success && result.escrow) {
+              toast.success('Multi-sig escrow created');
+              setMultiSigData({
+                jobHash: result.escrow.job_hash,
+                signers: result.escrow.signers,
+                approvals: result.escrow.approvals,
+                requiredSigs: result.escrow.required_sigs,
+                sigCount: result.escrow.sig_count,
+                status: result.escrow.status,
+              });
+            } else {
+              toast.error(result.error || 'Failed to create multi-sig escrow');
+            }
           }}
           agentAddress={agent.agent_id}
           amount={10_000_000}
+        />
+      )}
+      {showRatingForm && (
+        <RatingForm
+          isOpen={showRatingForm}
+          onClose={() => setShowRatingForm(false)}
+          onSubmit={async (rating, jobHash) => {
+            const result = await submitRating(agent.agent_id, {
+              job_hash: jobHash,
+              rating,
+            });
+            if (result.success) {
+              toast.success('Rating submitted successfully');
+              useAgentStore.getState().addTransaction({ type: 'rating_submitted', agentId: agent.agent_id });
+            } else {
+              toast.error(result.error || 'Failed to submit rating');
+            }
+          }}
+          agentAddress={agent.agent_id}
+        />
+      )}
+      {showSessionManager && (
+        <SessionManager
+          isOpen={showSessionManager}
+          onClose={() => setShowSessionManager(false)}
+          agentAddress={agent.agent_id}
         />
       )}
     </div>
