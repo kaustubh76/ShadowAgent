@@ -459,4 +459,321 @@ describe('ShadowAgentServer', () => {
       // (They would fail with "Job not found" if cleaned up)
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Partial Refunds
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('acceptPartialRefund', () => {
+    it('should accept a refund proposal', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ tx_id: 'tx_accept_refund' }),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const result = await agent.acceptPartialRefund('job_hash_123');
+
+      expect(result.success).toBe(true);
+      expect(result.txId).toBe('tx_accept_refund');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/refunds/job_hash_123/accept',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('should handle acceptance failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Refund not found' }),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.acceptPartialRefund('bad_hash');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Refund not found');
+    });
+  });
+
+  describe('rejectPartialRefund', () => {
+    it('should reject a refund proposal', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const result = await agent.rejectPartialRefund('job_hash_456');
+
+      expect(result.success).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/refunds/job_hash_456/reject',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('should handle rejection failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Already resolved' }),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.rejectPartialRefund('job_hash_456');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Already resolved');
+    });
+  });
+
+  describe('getPendingRefundProposals', () => {
+    it('should list pending refund proposals', async () => {
+      const mockProposals = [
+        { job_hash: 'job1', refund_amount: 50000, status: 'proposed' },
+        { job_hash: 'job2', refund_amount: 75000, status: 'proposed' },
+      ];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockProposals),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const proposals = await agent.getPendingRefundProposals();
+
+      expect(proposals).toHaveLength(2);
+      expect(proposals[0].job_hash).toBe('job1');
+    });
+
+    it('should return empty array on error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        statusText: 'Internal Server Error',
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const proposals = await agent.getPendingRefundProposals();
+
+      expect(proposals).toEqual([]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Dispute Resolution
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('respondToDispute', () => {
+    it('should respond to dispute with evidence', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ tx_id: 'tx_dispute_response' }),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const result = await agent.respondToDispute('job_hash_789', 'evidence_hash_abc');
+
+      expect(result.success).toBe(true);
+      expect(result.txId).toBe('tx_dispute_response');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/disputes/job_hash_789/respond',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('evidence_hash_abc'),
+        })
+      );
+    });
+
+    it('should handle dispute response failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Dispute already resolved' }),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.respondToDispute('job_hash_789', 'evidence');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Dispute already resolved');
+    });
+  });
+
+  describe('getOpenDisputes', () => {
+    it('should list open disputes', async () => {
+      const mockDisputes = [
+        { job_hash: 'job1', reason: 'quality', status: 'open' },
+        { job_hash: 'job2', reason: 'timeout', status: 'open' },
+      ];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockDisputes),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const disputes = await agent.getOpenDisputes();
+
+      expect(disputes).toHaveLength(2);
+      expect(disputes[0].job_hash).toBe('job1');
+    });
+
+    it('should return empty array on error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        statusText: 'Internal Server Error',
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const disputes = await agent.getOpenDisputes();
+
+      expect(disputes).toEqual([]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Multi-Sig Escrow
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('approveMultiSigEscrow', () => {
+    it('should approve multi-sig escrow release', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ tx_id: 'tx_multisig_approve' }),
+      });
+
+      const agent = createAgent({
+        privateKey: 'key',
+        serviceType: ServiceType.NLP,
+        facilitatorUrl: 'http://localhost:3000',
+      });
+
+      const result = await agent.approveMultiSigEscrow('job_hash_ms', 'my-secret-123');
+
+      expect(result.success).toBe(true);
+      expect(result.txId).toBe('tx_multisig_approve');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/escrows/multisig/job_hash_ms/approve',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('my-secret-123'),
+        })
+      );
+    });
+
+    it('should handle approval failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Not enough approvals' }),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.approveMultiSigEscrow('job_hash_ms', 'secret');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Not enough approvals');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 10a: Reputation Decay
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('getReputationWithDecay', () => {
+    it('should return null if no reputation set', async () => {
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.getReputationWithDecay();
+      expect(result).toBeNull();
+    });
+
+    it('should return decayed reputation when set', async () => {
+      // Mock getBlockHeight fetch call
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('2000000'),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      agent.setReputation({
+        owner: 'aleo1owner',
+        agent_id: 'agent123',
+        total_jobs: 100,
+        total_rating_points: 450,
+        total_revenue: 5000000,
+        tier: Tier.Silver,
+        created_at: 1000,
+        last_updated: 1900000,
+      });
+
+      const result = await agent.getReputationWithDecay();
+
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('effective_rating_points');
+      expect(result).toHaveProperty('decay_periods');
+      expect(result).toHaveProperty('decay_factor');
+      expect(result).toHaveProperty('effective_average_rating');
+      expect(result).toHaveProperty('effective_tier');
+    });
+  });
+
+  describe('proveReputationWithDecay', () => {
+    it('should fail without reputation data', async () => {
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      const result = await agent.proveReputationWithDecay(ProofType.Tier, Tier.Bronze);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No reputation data');
+    });
+
+    it('should attempt on-chain proof with reputation set', async () => {
+      // Mock getBlockHeight fetch call
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('2000000'),
+      });
+
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      agent.setReputation({
+        owner: 'aleo1owner',
+        agent_id: 'agent123',
+        total_jobs: 100,
+        total_rating_points: 450,
+        total_revenue: 5000000,
+        tier: Tier.Silver,
+        created_at: 1000,
+        last_updated: 1900000,
+      });
+
+      // executeProgram will fail since no real Aleo env
+      const result = await agent.proveReputationWithDecay(ProofType.Rating, 40);
+
+      // Will fail because executeProgram fails in test env, but it should attempt it
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
 });
