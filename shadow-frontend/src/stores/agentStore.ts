@@ -59,6 +59,40 @@ export interface RefundInfo {
   status: 'proposed' | 'accepted' | 'rejected';
 }
 
+// Phase 5: Spending policy info
+export interface PolicyInfo {
+  policy_id: string;
+  owner: string;
+  max_session_value: number;
+  max_single_request: number;
+  allowed_tiers: number;
+  allowed_categories: number;
+  require_proofs: boolean;
+  created_at: string;
+}
+
+// Phase 5: Session info
+export interface SessionInfo {
+  session_id: string;
+  client: string;
+  agent: string;
+  max_total: number;
+  max_per_request: number;
+  rate_limit: number;
+  spent: number;
+  request_count: number;
+  valid_until: number;
+  duration_blocks: number;
+  status: 'active' | 'paused' | 'closed';
+  created_at: string;
+  updated_at: string;
+  receipts: Array<{
+    request_hash: string;
+    amount: number;
+    timestamp: string;
+  }>;
+}
+
 interface AgentState {
   // Agent mode (for service providers)
   isRegistered: boolean;
@@ -79,6 +113,12 @@ interface AgentState {
   disputes: DisputeInfo[];
   partialRefunds: RefundInfo[];
 
+  // Phase 5: Sessions & Policies
+  sessions: SessionInfo[];
+  activeSession: SessionInfo | null;
+  policies: PolicyInfo[];
+  activePolicy: PolicyInfo | null;
+
   // Client mode (for consumers)
   searchResults: AgentListing[];
   selectedAgent: AgentListing | null;
@@ -88,7 +128,7 @@ interface AgentState {
   // Transaction history
   transactions: Array<{
     id: string;
-    type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted' | 'dispute_opened' | 'dispute_resolved' | 'partial_refund_proposed' | 'partial_refund_accepted';
+    type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted' | 'dispute_opened' | 'dispute_resolved' | 'partial_refund_proposed' | 'partial_refund_accepted' | 'session_created' | 'session_closed';
     agentId: string;
     amount?: number;
     timestamp: number;
@@ -111,6 +151,17 @@ interface AgentState {
   setPartialRefunds: (refunds: RefundInfo[]) => void;
   addPartialRefund: (refund: RefundInfo) => void;
 
+  // Actions - Sessions
+  setSessions: (sessions: SessionInfo[]) => void;
+  addSession: (session: SessionInfo) => void;
+  updateSession: (sessionId: string, updates: Partial<SessionInfo>) => void;
+  setActiveSession: (session: SessionInfo | null) => void;
+
+  // Actions - Policies
+  setPolicies: (policies: PolicyInfo[]) => void;
+  addPolicy: (policy: PolicyInfo) => void;
+  setActivePolicy: (policy: PolicyInfo | null) => void;
+
   // Actions - Transactions
   addTransaction: (transaction: Omit<AgentState['transactions'][0], 'id' | 'timestamp'>) => void;
   clearTransactions: () => void;
@@ -126,6 +177,10 @@ export const useAgentStore = create<AgentState>((set) => ({
   effectiveTier: null,
   disputes: [],
   partialRefunds: [],
+  sessions: [],
+  activeSession: null,
+  policies: [],
+  activePolicy: null,
   searchResults: [],
   selectedAgent: null,
   filters: { is_active: true },
@@ -160,6 +215,32 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   addPartialRefund: (refund) =>
     set((state) => ({ partialRefunds: [refund, ...state.partialRefunds] })),
+
+  // Session actions
+  setSessions: (sessions) => set({ sessions }),
+
+  addSession: (session) =>
+    set((state) => ({ sessions: [session, ...state.sessions] })),
+
+  updateSession: (sessionId, updates) =>
+    set((state) => ({
+      sessions: state.sessions.map(s =>
+        s.session_id === sessionId ? { ...s, ...updates } : s
+      ),
+      activeSession: state.activeSession?.session_id === sessionId
+        ? { ...state.activeSession, ...updates }
+        : state.activeSession,
+    })),
+
+  setActiveSession: (session) => set({ activeSession: session }),
+
+  // Policy actions
+  setPolicies: (policies) => set({ policies }),
+
+  addPolicy: (policy) =>
+    set((state) => ({ policies: [policy, ...state.policies] })),
+
+  setActivePolicy: (policy) => set({ activePolicy: policy }),
 
   // Transaction actions
   addTransaction: (transaction) =>
