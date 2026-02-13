@@ -6,6 +6,7 @@
 // Program IDs for ShadowAgent
 export const SHADOW_AGENT_PROGRAM = 'shadow_agent.aleo';
 export const SHADOW_AGENT_EXT_PROGRAM = 'shadow_agent_ext.aleo';
+export const SHADOW_AGENT_SESSION_PROGRAM = 'shadow_agent_session.aleo';
 
 // --- Lazy SDK loader (defers WASM until runtime) ---
 
@@ -94,14 +95,25 @@ export async function generateAgentId(address: string): Promise<string> {
  */
 export function encodeBase64(data: string | object): string {
   const str = typeof data === 'object' ? JSON.stringify(data) : data;
-  return btoa(str);
+  // Use TextEncoder for UTF-8 safety (handles non-ASCII characters)
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 /**
  * Decode base64 data
  */
 export function decodeBase64<T = string>(encoded: string): T {
-  const decoded = atob(encoded);
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const decoded = new TextDecoder().decode(bytes);
   try {
     return JSON.parse(decoded) as T;
   } catch {
