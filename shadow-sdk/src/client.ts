@@ -29,7 +29,10 @@ import {
   getAddress,
   waitForTransaction,
   executeProgram,
+  generateSessionId,
   SHADOW_AGENT_EXT_PROGRAM,
+  SHADOW_AGENT_SESSION_PROGRAM,
+  getBlockHeight,
 } from './crypto';
 
 // Rating burn cost in microcredits (0.5 credits)
@@ -37,6 +40,7 @@ const RATING_BURN_COST = 500_000;
 
 const DEFAULT_FACILITATOR_URL = 'http://localhost:3000';
 const DEFAULT_TIMEOUT = 30000;
+const DEFAULT_ADMIN_ADDRESS = 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
 
 /**
  * ShadowAgent Client SDK
@@ -73,6 +77,7 @@ export class ShadowAgentClient {
       network: config.network || 'testnet',
       facilitatorUrl: config.facilitatorUrl || DEFAULT_FACILITATOR_URL,
       timeout: config.timeout || DEFAULT_TIMEOUT,
+      adminAddress: config.adminAddress || DEFAULT_ADMIN_ADDRESS,
     };
   }
 
@@ -533,6 +538,13 @@ export class ShadowAgentClient {
   }
 
   /**
+   * Fetch current block height from the Aleo network
+   */
+  private async getCurrentBlockHeight(): Promise<number> {
+    return getBlockHeight();
+  }
+
+  /**
    * Get current configuration
    */
   getConfig(): Readonly<ClientConfig> {
@@ -658,8 +670,7 @@ export class ShadowAgentClient {
     }
 
     try {
-      // TODO: admin address should be configurable
-      const adminAddress = 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+      const adminAddress = this.config.adminAddress;
 
       const txId = await executeProgram(
         this.config.privateKey,
@@ -814,6 +825,419 @@ export class ShadowAgentClient {
       }
 
       return response.json() as Promise<MultiSigEscrow>;
+    } catch {
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 5: Session-Based Payments
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Create a pre-authorized spending session with an agent
+   * Client signs once — agent can make requests within bounds without further signatures
+   */
+  async createSession(
+    agent: string,
+    maxTotal: number,
+    maxPerRequest: number,
+    rateLimit: number,
+    durationBlocks: number
+  ): Promise<{ success: boolean; sessionId?: string; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to create a session' };
+    }
+
+    const sessionId = generateSessionId();
+
+    try {
+      // Fetch current block height for on-chain verification
+      const blockHeight = await this.getCurrentBlockHeight();
+
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_SESSION_PROGRAM,
+        'create_session',
+        [
+          agent,
+          `${maxTotal}u64`,
+          `${maxPerRequest}u64`,
+          `${rateLimit}u64`,
+          `${durationBlocks}u64`,
+          `${blockHeight}u64`,
+        ],
+      );
+
+      return { success: true, sessionId, txId };
+    } catch (error) {
+      // Fallback to facilitator
+      try {
+        const url = `${this.config.facilitatorUrl}/sessions`;
+        const response = await this.fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent,
+            max_total: maxTotal,
+            max_per_request: maxPerRequest,
+            rate_limit: rateLimit,
+            duration_blocks: durationBlocks,
+            session_id: sessionId,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: errorData.error || 'Session creation failed' };
+        }
+
+        const result = await response.json() as { session_id?: string; tx_id?: string };
+        return { success: true, sessionId: result.session_id || sessionId, txId: result.tx_id };
+      } catch {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Session creation failed',
+        };
+      }
+    }
+  }
+
+  /**
+   * Make a request against an active session (called by the agent)
+   */
+  async sessionRequest(
+    sessionId: string,
+    amount: number,
+    requestHash: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for session request' };
+    }
+
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/request`;
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, request_hash: requestHash }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session request failed' };
+      }
+
+      const result = await response.json() as { tx_id?: string };
+      return { success: true, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session request failed',
+      };
+    }
+  }
+
+  /**
+   * Settle accumulated payments from a session (called by the agent)
+   */
+  async settleSession(
+    sessionId: string,
+    settlementAmount: number
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to settle session' };
+    }
+
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/settle`;
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settlement_amount: settlementAmount }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session settlement failed' };
+      }
+
+      const result = await response.json() as { tx_id?: string };
+      return { success: true, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session settlement failed',
+      };
+    }
+  }
+
+  /**
+   * Close a session and reclaim unused funds (called by the client)
+   */
+  async closeSession(
+    sessionId: string
+  ): Promise<{ success: boolean; refundAmount?: number; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to close session' };
+    }
+
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/close`;
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session close failed' };
+      }
+
+      const result = await response.json() as { refund_amount?: number; tx_id?: string };
+      return { success: true, refundAmount: result.refund_amount, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session close failed',
+      };
+    }
+  }
+
+  /**
+   * Pause an active session (called by the client)
+   */
+  async pauseSession(
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/pause`;
+      const response = await this.fetchWithTimeout(url, { method: 'POST' });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session pause failed' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session pause failed',
+      };
+    }
+  }
+
+  /**
+   * Resume a paused session (called by the client)
+   */
+  async resumeSession(
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/resume`;
+      const response = await this.fetchWithTimeout(url, { method: 'POST' });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session resume failed' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session resume failed',
+      };
+    }
+  }
+
+  /**
+   * Get the status of a session
+   */
+  async getSessionStatus(sessionId: string): Promise<import('./types').PaymentSession | null> {
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/${sessionId}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<import('./types').PaymentSession>;
+    } catch {
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 5: Spending Policies
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Create a reusable spending policy template
+   * Policies constrain session parameters (max value, per-request cap, allowed tiers/categories)
+   */
+  async createPolicy(
+    maxSessionValue: number,
+    maxSingleRequest: number,
+    allowedTiers: number = 0xff,
+    allowedCategories: number = 0xffffffff,
+    requireProofs: boolean = false
+  ): Promise<{ success: boolean; policyId?: string; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to create a policy' };
+    }
+
+    if (maxSingleRequest > maxSessionValue) {
+      return { success: false, error: 'maxSingleRequest cannot exceed maxSessionValue' };
+    }
+
+    try {
+      const blockHeight = await this.getCurrentBlockHeight();
+
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_SESSION_PROGRAM,
+        'create_policy',
+        [
+          `${maxSessionValue}u64`,
+          `${maxSingleRequest}u64`,
+          `${allowedTiers}u8`,
+          `${allowedCategories}u64`,
+          requireProofs.toString(),
+          `${blockHeight}u64`,
+        ],
+      );
+
+      return { success: true, txId };
+    } catch (error) {
+      // Fallback to facilitator
+      try {
+        const senderAddress = this.config.privateKey
+          ? await getAddress(this.config.privateKey)
+          : 'unknown';
+
+        const url = `${this.config.facilitatorUrl}/sessions/policies`;
+        const response = await this.fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner: senderAddress,
+            max_session_value: maxSessionValue,
+            max_single_request: maxSingleRequest,
+            allowed_tiers: allowedTiers,
+            allowed_categories: allowedCategories,
+            require_proofs: requireProofs,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: errorData.error || 'Policy creation failed' };
+        }
+
+        const result = await response.json() as { policy?: { policy_id?: string } };
+        return { success: true, policyId: result.policy?.policy_id };
+      } catch {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Policy creation failed',
+        };
+      }
+    }
+  }
+
+  /**
+   * Create a session constrained by a spending policy
+   */
+  async createSessionFromPolicy(
+    policyId: string,
+    agent: string,
+    maxTotal: number,
+    maxPerRequest: number,
+    rateLimit: number,
+    durationBlocks: number
+  ): Promise<{ success: boolean; sessionId?: string; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required to create a session from policy' };
+    }
+
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/policies/${policyId}/create-session`;
+      const senderAddress = await getAddress(this.config.privateKey);
+
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent,
+          client: senderAddress,
+          max_total: maxTotal,
+          max_per_request: maxPerRequest,
+          rate_limit: rateLimit,
+          duration_blocks: durationBlocks,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: string };
+        return { success: false, error: errorData.error || 'Session creation from policy failed' };
+      }
+
+      const result = await response.json() as { session?: { session_id?: string }; tx_id?: string };
+      return { success: true, sessionId: result.session?.session_id, txId: result.tx_id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Session creation from policy failed',
+      };
+    }
+  }
+
+  /**
+   * List spending policies for the current user
+   */
+  async listPolicies(): Promise<import('./types').SpendingPolicy[]> {
+    try {
+      const owner = this.config.privateKey
+        ? await getAddress(this.config.privateKey)
+        : undefined;
+
+      const params = new URLSearchParams();
+      if (owner) params.set('owner', owner);
+
+      const url = `${this.config.facilitatorUrl}/sessions/policies?${params.toString()}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (!response.ok) {
+        return [];
+      }
+
+      return response.json() as Promise<import('./types').SpendingPolicy[]>;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get a specific spending policy
+   */
+  async getPolicy(policyId: string): Promise<import('./types').SpendingPolicy | null> {
+    try {
+      const url = `${this.config.facilitatorUrl}/sessions/policies/${policyId}`;
+      const response = await this.fetchWithTimeout(url);
+
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<import('./types').SpendingPolicy>;
     } catch {
       return null;
     }
