@@ -31,72 +31,72 @@ describe('Crypto Utilities', () => {
   });
 
   describe('hashSecret', () => {
-    it('should produce consistent hashes for same input', () => {
+    it('should produce consistent hashes for same input', async () => {
       const secret = 'test-secret-12345';
-      const hash1 = hashSecret(secret);
-      const hash2 = hashSecret(secret);
+      const hash1 = await hashSecret(secret);
+      const hash2 = await hashSecret(secret);
       expect(hash1).toBe(hash2);
     });
 
-    it('should produce different hashes for different inputs', () => {
-      const hash1 = hashSecret('secret1');
-      const hash2 = hashSecret('secret2');
+    it('should produce different hashes for different inputs', async () => {
+      const hash1 = await hashSecret('secret1');
+      const hash2 = await hashSecret('secret2');
       expect(hash1).not.toBe(hash2);
     });
 
-    it('should produce a 64-character hex string', () => {
-      const hash = hashSecret('any-secret');
+    it('should produce a 64-character hex string', async () => {
+      const hash = await hashSecret('any-secret');
       expect(hash).toHaveLength(64);
       expect(/^[a-f0-9]+$/.test(hash)).toBe(true);
     });
   });
 
   describe('verifyHash', () => {
-    it('should verify correct secret-hash pairs', () => {
+    it('should verify correct secret-hash pairs', async () => {
       const secret = generateSecret();
-      const hash = hashSecret(secret);
-      expect(verifyHash(secret, hash)).toBe(true);
+      const hash = await hashSecret(secret);
+      expect(await verifyHash(secret, hash)).toBe(true);
     });
 
-    it('should reject incorrect secret-hash pairs', () => {
+    it('should reject incorrect secret-hash pairs', async () => {
       const secret = generateSecret();
-      const wrongHash = hashSecret('different-secret');
-      expect(verifyHash(secret, wrongHash)).toBe(false);
+      const wrongHash = await hashSecret('different-secret');
+      expect(await verifyHash(secret, wrongHash)).toBe(false);
     });
   });
 
   describe('generateAgentId', () => {
-    it('should produce consistent IDs for same input', () => {
+    it('should produce consistent IDs for same input', async () => {
       const privateKey = 'APrivateKey1test123';
-      const id1 = generateAgentId(privateKey);
-      const id2 = generateAgentId(privateKey);
+      const id1 = await generateAgentId(privateKey);
+      const id2 = await generateAgentId(privateKey);
       expect(id1).toBe(id2);
     });
 
-    it('should produce different IDs for different inputs', () => {
-      const id1 = generateAgentId('key1');
-      const id2 = generateAgentId('key2');
+    it('should produce different IDs for different inputs', async () => {
+      const id1 = await generateAgentId('key1');
+      const id2 = await generateAgentId('key2');
       expect(id1).not.toBe(id2);
     });
   });
 
   describe('generateJobHash', () => {
-    it('should produce unique hashes each call (includes nonce)', () => {
-      const hash1 = generateJobHash('POST', '/api/complete');
-      const hash2 = generateJobHash('POST', '/api/complete');
+    it('should produce unique hashes each call (includes nonce)', async () => {
+      const hash1 = await generateJobHash('POST', '/api/complete');
+      const hash2 = await generateJobHash('POST', '/api/complete');
       // Each call includes a random nonce, so hashes should be different
       expect(hash1).not.toBe(hash2);
     });
 
-    it('should produce a 64-character hex string', () => {
-      const hash = generateJobHash('POST', '/api/complete');
+    it('should produce a 64-character hex string', async () => {
+      const hash = await generateJobHash('POST', '/api/complete');
       expect(hash).toHaveLength(64);
       expect(/^[a-f0-9]+$/.test(hash)).toBe(true);
     });
 
-    it('should accept optional timestamp parameter', () => {
+    it('should accept optional timestamp parameter', async () => {
       const timestamp = 1704067200000;
-      const hash = generateJobHash('POST', '/api/complete', timestamp);
+      const hash = await generateJobHash('POST', '/api/complete', timestamp);
       expect(hash).toHaveLength(64);
     });
   });
