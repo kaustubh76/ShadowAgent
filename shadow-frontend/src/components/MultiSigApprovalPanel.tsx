@@ -6,6 +6,8 @@ interface MultiSigApprovalPanelProps {
   requiredSigs: number;
   sigCount: number;
   status: 'locked' | 'released' | 'refunded';
+  onApprove?: (signerAddress: string) => void;
+  currentUserAddress?: string;
 }
 
 export default function MultiSigApprovalPanel({
@@ -14,6 +16,8 @@ export default function MultiSigApprovalPanel({
   requiredSigs,
   sigCount,
   status,
+  onApprove,
+  currentUserAddress,
 }: MultiSigApprovalPanelProps) {
   const isReleased = status === 'released';
   const isRefunded = status === 'refunded';
@@ -70,9 +74,18 @@ export default function MultiSigApprovalPanel({
                   {signer.slice(0, 12)}...{signer.slice(-6)}
                 </span>
               </div>
-              <span className={`text-xs font-medium ${isApproved ? 'text-green-400' : 'text-gray-600'}`}>
-                {isApproved ? 'Approved' : 'Pending'}
-              </span>
+              {!isApproved && onApprove && currentUserAddress === signer && status === 'locked' ? (
+                <button
+                  onClick={() => onApprove(signer)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium bg-shadow-600/20 text-shadow-300 border border-shadow-500/30 hover:bg-shadow-600/30 transition-all"
+                >
+                  Approve
+                </button>
+              ) : (
+                <span className={`text-xs font-medium ${isApproved ? 'text-green-400' : 'text-gray-600'}`}>
+                  {isApproved ? 'Approved' : 'Pending'}
+                </span>
+              )}
             </div>
           );
         })}
