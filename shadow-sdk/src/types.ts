@@ -127,19 +127,58 @@ export interface EscrowRecord {
 }
 
 /**
+ * Session status
+ */
+export enum SessionStatus {
+  Active = 0,
+  Paused = 1,
+  Closed = 2,
+}
+
+/**
  * Payment session (for session-based payments)
+ * Matches PaymentSession record in shadow_agent_session.aleo
  */
 export interface PaymentSession {
+  owner: string;
   session_id: string;
   client: string;
   agent: string;
   max_total: number;
   max_per_request: number;
   rate_limit: number;
-  expires_at: number;
-  total_spent: number;
+  spent: number;
   request_count: number;
-  status: 'active' | 'closed' | 'expired';
+  window_start: number;
+  valid_until: number;
+  status: SessionStatus | 'active' | 'paused' | 'closed' | 'expired';
+}
+
+/**
+ * Session receipt for per-request tracking
+ * Matches SessionReceipt record in shadow_agent_session.aleo
+ */
+export interface SessionReceipt {
+  owner: string;
+  session_id: string;
+  request_hash: string;
+  amount: number;
+  timestamp: number;
+}
+
+/**
+ * Reusable spending policy
+ * Matches SpendingPolicy record in shadow_agent_session.aleo
+ */
+export interface SpendingPolicy {
+  owner: string;
+  policy_id: string;
+  max_session_value: number;
+  max_single_request: number;
+  allowed_tiers: number;
+  allowed_categories: number;
+  require_proofs: boolean;
+  created_at: number;
 }
 
 /**
@@ -202,6 +241,7 @@ export interface ClientConfig {
   network?: 'testnet' | 'mainnet';
   facilitatorUrl?: string;
   timeout?: number;
+  adminAddress?: string;
 }
 
 /**
