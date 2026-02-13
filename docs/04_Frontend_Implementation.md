@@ -2,10 +2,11 @@
 
 ## Overview
 
-The ShadowAgent frontend is a React single-page application providing two main views: **Agent Dashboard** (for AI service providers to register and manage their on-chain reputation) and **Client Discovery** (for consumers to search, hire, and pay agents). It integrates directly with the `shadow_agent.aleo` smart contract deployed on Aleo testnet via the `@provablehq/sdk` and the `@shadowagent/sdk`.
+The ShadowAgent frontend is a React single-page application providing views for **Agent Dashboard** (register, manage, prove), **Client Discovery** (search, hire, pay), and **Dispute Center** (disputes, refunds). It integrates directly with the `shadow_agent.aleo` and `shadow_agent_ext.aleo` smart contracts deployed on Aleo testnet via the `@provablehq/sdk` and the `@shadowagent/sdk`.
 
-**Live Contract:** `shadow_agent.aleo` on Aleo testnet
-**Deployment TX:** `at105knrkmfhsc8mlzd3sz5nmk2vy4jnsjdktdwq4fr236jcssasvpqp2sv9p`
+**Live Contracts:** `shadow_agent.aleo` + `shadow_agent_ext.aleo` on Aleo testnet
+**Core Deploy TX:** `at105knrkmfhsc8mlzd3sz5nmk2vy4jnsjdktdwq4fr236jcssasvpqp2sv9p`
+**Extension Deploy TX:** `at1fpwhdvs77vn37ngxrnty40qxsnwwuccu660e73f409nssjk3vyqqxpx647`
 
 ---
 
@@ -57,11 +58,14 @@ shadow-frontend/
 │   │   ├── Header.tsx              # Glassmorphism nav with scroll awareness
 │   │   ├── AgentCard.tsx           # Agent listing card with shine effects
 │   │   ├── TierBadge.tsx           # Tier indicator (New/Bronze/Silver/Gold/Diamond)
-│   │   └── ConnectWallet.tsx       # Shield Wallet connect/balance/disconnect
+│   │   ├── ConnectWallet.tsx       # Shield Wallet connect/balance/disconnect
+│   │   ├── RatingForm.tsx          # Star rating submission (Phase 10a)
+│   │   └── MultiSigApprovalPanel.tsx # Multi-sig escrow approval UI (Phase 10a)
 │   ├── pages/
 │   │   ├── HomePage.tsx            # Landing: hero, features, roadmap
 │   │   ├── AgentDashboard.tsx      # Register agent, view stats, generate proofs
-│   │   ├── ClientDashboard.tsx     # Search agents with filters
+│   │   ├── ClientDashboard.tsx     # Search agents with filters + multi-sig
+│   │   ├── DisputeCenter.tsx       # Disputes + partial refunds (Phase 10a)
 │   │   └── AgentDetails.tsx        # Agent detail + hire modal + proof modal
 │   ├── providers/
 │   │   └── WalletProvider.tsx      # Shield Wallet context (ProgramManager)
@@ -138,11 +142,12 @@ VITE_SHIELD_WALLET_VIEW_KEY=AViewKey1...        # Record decryption key
 The app uses React Router v6 with a shared layout:
 
 ```
-/           → HomePage       (landing page)
-/agent      → AgentDashboard (register, manage, prove)
-/client     → ClientDashboard (search agents)
-/agents/:id → AgentDetails   (detail view + hire)
-*           → NotFound       (404)
+/           → HomePage        (landing page)
+/agent      → AgentDashboard  (register, manage, prove)
+/client     → ClientDashboard (search agents, multi-sig escrow)
+/disputes   → DisputeCenter   (disputes + refunds)
+/agents/:id → AgentDetails    (detail view + hire)
+*           → NotFound        (404)
 ```
 
 ```tsx
@@ -152,6 +157,7 @@ The app uses React Router v6 with a shared layout:
     <Route index element={<HomePage />} />
     <Route path="agent" element={<AgentDashboard />} />
     <Route path="client" element={<ClientDashboard />} />
+    <Route path="disputes" element={<DisputeCenter />} />
     <Route path="agents/:agentId" element={<AgentDetails />} />
     <Route path="*" element={<NotFound />} />
   </Route>
@@ -276,6 +282,7 @@ const match = balanceText.match(/(\d+)u64/);
 ```typescript
 // services/aleo.ts
 export const SHADOW_AGENT_PROGRAM_ID = 'shadow_agent.aleo';
+export const SHADOW_AGENT_EXT_PROGRAM_ID = 'shadow_agent_ext.aleo';
 export const ALEO_RPC_URL = 'https://api.explorer.provable.com/v1';
 export const REGISTRATION_BOND = 10_000_000;   // 10 credits
 export const RATING_BURN_COST = 500_000;       // 0.5 credits
@@ -386,7 +393,7 @@ Layout.tsx
 ├── divider-glow (gradient line below header)
 ├── Header.tsx
 │   ├── Logo (glow on hover)
-│   ├── Navigation pills (Home, Find Agents, Agent Panel)
+│   ├── Navigation pills (Home, Find Agents, Agent Panel, Disputes)
 │   ├── Active route indicator (underline bar)
 │   ├── ConnectWallet.tsx
 │   └── Mobile menu (hamburger + staggered items)
@@ -404,6 +411,11 @@ Layout.tsx
 - *Not connected:* Connect wallet prompt with gradient icon
 - *Connected:* Registration form OR dashboard stats (4 gradient stat cards), ZK proof generation section, unregister option
 
+**DisputeCenter** (Phase 10a) — Tabbed interface (Disputes / Refunds), role toggle (client/agent view):
+- *Disputes tab:* List of disputes with status badges, client can open disputes with evidence hash, agent can respond with counter-evidence via inline form
+- *Refunds tab:* List of partial refund proposals with accept/reject buttons for agents
+- Uses `fetchDisputes`, `fetchRefunds`, `respondToDispute`, `acceptRefund`, `rejectRefund` from API client
+
 **AgentDetails** — Back link, header card (name + tier + status), details grid (service info + privacy checks), hire action card with numbered steps, two modals: ReputationProofModal (verify ZK proof) and RequestServiceModal (create escrow payment).
 
 ### 7.3 Shared Components
@@ -416,6 +428,10 @@ Layout.tsx
 - *Disconnected:* Primary button with Wallet icon
 - *Connected:* Balance display (ALEO), glass address chip with emerald pulse dot, copy button, explorer link, disconnect button
 
+**RatingForm** (Phase 10a) — Star rating submission component with 1-5 star selector, job hash input, optional payment amount. Submits rating via `submitRating` API. Shows toast feedback on success/error.
+
+**MultiSigApprovalPanel** (Phase 10a) — Multi-signature escrow management panel used in ClientDashboard. Fetches pending multi-sig escrows for the connected wallet, displays signer status and approval progress, provides "Approve" action button. Uses `fetchMultiSigEscrow` and `approveMultiSigEscrow` API calls.
+
 **ToastContext** — 4 types (success/error/info/warning), icon container with type-specific background, backdrop-blur-xl, auto-dismiss after 5 seconds, slide-in-right animation.
 
 ---
@@ -426,11 +442,28 @@ Layout.tsx
 
 ```typescript
 // lib/api.ts - Uses SDK client when available, falls back to direct fetch
+
+// Core
 searchAgents(filters, limit, offset) → { agents, total, limit, offset }
 getAgent(agentId)                    → AgentListing | null
 verifyReputationProof(proof)         → { valid, tier?, error? }
-verifyEscrowProof(proof)             → { valid, error? }
-getHealth()                          → { status, blockHeight? }
+
+// Phase 10a: Disputes & Refunds
+fetchDisputes(params?)               → DisputeInfo[]
+submitDispute(data)                  → { success, dispute?, error? }
+respondToDispute(jobHash, evidence)  → { success, dispute?, error? }
+fetchRefunds(params?)                → RefundInfo[]
+submitRefund(data)                   → { success, proposal?, error? }
+acceptRefund(jobHash)                → { success, proposal?, error? }
+rejectRefund(jobHash)                → { success, proposal?, error? }
+
+// Phase 10a: Multi-Sig Escrow
+fetchMultiSigEscrow(jobHash)         → MultiSigEscrowData | null
+createMultiSigEscrow(data)           → { success, escrow?, error? }
+approveMultiSigEscrow(jobHash, addr) → { success, escrow?, threshold_met?, error? }
+
+// Phase 10a: Ratings
+submitRating(agentId, data)          → { success, rating?, error? }
 ```
 
 ### 8.2 SDK Store Health Checks

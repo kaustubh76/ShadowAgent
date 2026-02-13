@@ -7,8 +7,9 @@
 | Contract | Program ID |
 |----------|------------|
 | ShadowAgent Core | `shadow_agent.aleo` |
+| ShadowAgent Extension (Phase 10a) | `shadow_agent_ext.aleo` |
 
-## Deployment Transaction
+## Core Contract Deployment
 
 | Field | Value |
 |-------|-------|
@@ -18,7 +19,17 @@
 | Network | Aleo Testnet |
 | Deployment Date | January 2025 (Hackathon MVP) |
 
-## Verified Transitions
+## Extension Contract Deployment
+
+| Field | Value |
+|-------|-------|
+| Program ID | `shadow_agent_ext.aleo` |
+| Deploy TX | `at1fpwhdvs77vn37ngxrnty40qxsnwwuccu660e73f409nssjk3vyqqxpx647` |
+| Constructor | `@noupgrade` (immutable) |
+| Network | Aleo Testnet |
+| Deployment Date | Phase 10a (Foundation Hardening) |
+
+## Verified Transitions (Core)
 
 | Transition | Transaction ID | Status |
 |------------|---------------|--------|
@@ -28,13 +39,16 @@
 
 ## On-Chain Mappings
 
-| Mapping | Key Type | Value Type | Purpose |
-|---------|----------|------------|---------|
-| `registered_agents` | `address` | `boolean` | Agent registration check (1 per address) |
-| `agent_listings` | `field` | `PublicListing` | Public agent listing data |
-| `used_nullifiers` | `field` | `boolean` | Sybil resistance (prevents double-rating) |
+| Contract | Mapping | Key Type | Value Type | Purpose |
+|----------|---------|----------|------------|---------|
+| Core | `registered_agents` | `address` | `boolean` | Agent registration check (1 per address) |
+| Core | `agent_listings` | `field` | `PublicListing` | Public agent listing data |
+| Core | `used_nullifiers` | `field` | `boolean` | Sybil resistance (prevents double-rating) |
+| Extension | `active_disputes` | `field` | `boolean` | Track open disputes by job hash |
 
 ## Records (Private State)
+
+### Core Contract Records (5)
 
 | Record | Fields | Purpose |
 |--------|--------|---------|
@@ -43,13 +57,19 @@
 | `RatingRecord` | `client_nullifier`, `job_hash`, `rating`, `payment_amount`, `burn_proof` | Rating submission receipt |
 | `ReputationProof` | `proof_type`, `threshold_met`, `tier_proven` | ZK proof of reputation |
 | `EscrowRecord` | `agent`, `amount`, `job_hash`, `deadline`, `secret_hash`, `status` | HTLC escrow payment |
-| `PaymentSession` | `agent`, `session_id`, `max_total`, `max_per_request`, `rate_limit`, `spent`, `valid_until`, `status` | Pre-authorized spending session |
-| `SpendingPolicy` | `policy_id`, `max_session_value`, `allowed_tiers`, `allowed_categories`, `require_proofs` | Reusable session authorization |
-| `SessionReceipt` | `session_id`, `request_hash`, `amount` | Per-request settlement receipt |
+
+### Extension Contract Records (4)
+
+| Record | Fields | Purpose |
+|--------|--------|---------|
+| `SplitEscrowRecord` | `agent`, `client`, `total_amount`, `agent_amount`, `client_amount`, `job_hash`, `status` | Partial refund split tracking |
+| `DisputeRecord` | `client`, `agent`, `job_hash`, `escrow_amount`, `client_evidence_hash`, `agent_evidence_hash`, `status`, `resolution_agent_pct`, `opened_at` | Dispute lifecycle state |
+| `DecayedReputationProof` | `agent_id`, `effective_rating_points`, `total_jobs`, `decay_periods`, `proof_type`, `threshold_met`, `generated_at` | Decay-adjusted reputation ZK proof |
+| `MultiSigEscrowRecord` | `agent`, `amount`, `job_hash`, `deadline`, `secret_hash`, `signer_1/2/3`, `required_sigs`, `sig_count`, `sig_1/2/3_approved`, `status` | Multi-signature escrow payment |
 
 ## Contract Functions
 
-### Core Functions (12)
+### Core Contract Functions (12)
 
 | Function | Type | Description |
 |----------|------|-------------|
@@ -66,18 +86,23 @@
 | `prove_rating` | Private | ZK prove average rating >= threshold |
 | `prove_revenue_range` | Private | ZK prove revenue within range |
 
-### Session Functions (6)
+### Extension Contract Functions (11) — Phase 10a
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `create_session` | Private | Create pre-authorized spending session with bounds |
-| `session_request` | Private | Agent claims within session bounds (no client signature) |
-| `settle_session` | Private | Batch settle up to 100 session receipts |
-| `close_session` | Private | Close session and refund unused funds |
-| `pause_session` | Private | Temporarily suspend an active session |
-| `resume_session` | Private | Reactivate a paused session |
+| `propose_partial_refund` | Private | Client proposes an escrow split between agent and client |
+| `accept_partial_refund` | Private | Agent accepts the proposed refund split |
+| `reject_partial_refund` | Private | Agent rejects the proposed refund split |
+| `open_dispute` | Private + Finalize | Client opens a dispute with evidence hash |
+| `respond_to_dispute` | Private | Agent submits counter-evidence to dispute |
+| `resolve_dispute` | Private + Finalize | Arbitrator resolves dispute with percentage split |
+| `prove_rating_decay` | Private + Finalize | ZK prove decayed average rating >= threshold |
+| `prove_tier_with_decay` | Private + Finalize | ZK prove tier with decay-adjusted reputation |
+| `create_multisig_escrow` | Private | Create multi-signature escrow (2-of-3 or 3-of-3) |
+| `approve_escrow_release` | Private | Signer approves escrow release (requires secret) |
+| `refund_multisig_escrow` | Private + Finalize | Owner refunds expired multi-sig escrow |
 
-**Total:** 18 contract functions (12 core + 6 session)
+**Total:** 23 contract transitions (12 core + 11 extension), 4 mappings, 9 records
 
 ## Network Configuration
 

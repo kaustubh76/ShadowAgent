@@ -25,15 +25,17 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 | 2 | Core On-Chain Transitions | Completed | `01_Smart_Contract_Implementation.md` |
 | 3 | ZK Proof System | Completed | `01_Smart_Contract_Implementation.md` |
 | 4 | Escrow & Payment System | Completed | `01_Smart_Contract_Implementation.md` |
-| 5 | Session-Based Payments | Completed | `01_Smart_Contract_Implementation.md` |
+| 5 | Session-Based Payments | Designed (not deployed) | `01_Smart_Contract_Implementation.md` |
 | 6 | Facilitator Service | Completed | `02_Facilitator_Implementation.md` |
 | 7 | SDK Development | Completed | `03_SDK_Implementation.md` |
 | 8 | Frontend Application | Completed | `04_Frontend_Implementation.md` |
 | 9 | Testing & Quality Assurance | Completed | `05_Testing_Implementation.md` |
 | 10 | Future Roadmap & Scaling | Planned | `06_Future_Implementation_Plan.md` |
+| 10a | Foundation Hardening | Completed | See Phase 10a section below |
 
 **Status Legend:**
 - **Completed** = documented, implemented, and deployed on Aleo Testnet
+- **Designed (not deployed)** = fully specified in documentation but not present in deployed smart contracts
 - **Planned** = fully designed and documented for future implementation
 
 > **Note on Rating Scale:** The on-chain contract uses a **1-50 integer scale** (where 10 = 1 star). The frontend UI presents this as **1-5 stars** (e.g., user selects 4 stars -> on-chain value = 40). The SDK auto-scales between these formats via `RATING_SCALE = 10`.
@@ -50,19 +52,21 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   FRONTEND (React 18 + Vite)                                                │
-│   ├── Pages: Home, AgentDashboard, ClientDashboard, AgentDetails            │
+│   ├── Pages: Home, AgentDashboard, ClientDashboard, AgentDetails, Disputes  │
 │   ├── State: Zustand (walletStore, agentStore, sdkStore)                    │
 │   └── Wallet: Shield Wallet via @provablehq/sdk (WASM)                     │
 │         │                                                                    │
 │         ├──── Direct On-Chain ────────────────────────────────┐              │
-│         │     (register, escrow, rate, prove, sessions)       │              │
+│         │     (register, escrow, rate, prove, dispute, refund)│              │
 │         │                                                     │              │
 │         ▼                                                     ▼              │
 │   FACILITATOR (Express.js)                          ALEO BLOCKCHAIN          │
-│   ├── Routes: /agents, /verify                      ├── shadow_agent.aleo   │
-│   ├── Indexer: Block scanning                       ├── 3 public mappings   │
-│   └── Cache: Agent directory                        ├── 5 private records   │
-│         │                                           └── 18 transitions      │
+│   ├── Routes: /agents, /verify,                     ├── shadow_agent.aleo   │
+│   │   /disputes, /refunds,                          │   (12 transitions)    │
+│   │   /escrows/multisig                             ├── shadow_agent_ext.aleo│
+│   └── Cache: Agent directory                        │   (11 transitions)    │
+│         │                                           ├── 4 mappings          │
+│         │                                           └── 9 records           │
 │         │                                                     ▲              │
 │         └──── Reads On-Chain State ───────────────────────────┘              │
 │                                                                              │
@@ -87,17 +91,17 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 
 **Data Structures (6 core structs + 3 session structs):**
 
-| Struct | Purpose | Key Fields |
-|--------|---------|------------|
-| `AgentReputation` | Agent's private reputation data | `agent_id`, `total_jobs`, `total_rating_points`, `total_revenue`, `tier` |
-| `AgentBond` | Registration bond (returned on unregister) | `agent_id`, `amount`, `staked_at` |
-| `RatingRecord` | Rating submission receipt | `client_nullifier`, `job_hash`, `rating`, `payment_amount`, `burn_proof` |
-| `ReputationProof` | ZK proof of reputation | `proof_type`, `threshold_met`, `tier_proven` |
-| `EscrowRecord` | HTLC escrow payment | `agent`, `amount`, `job_hash`, `deadline`, `secret_hash`, `status` |
-| `PublicListing` | Agent's public marketplace listing | `agent_id`, `service_type`, `endpoint_hash`, `min_tier`, `is_active` |
-| `PaymentSession` | Pre-authorized spending session | `max_total`, `max_per_request`, `rate_limit`, `spent`, `valid_until` |
-| `SpendingPolicy` | Reusable authorization rules | `max_session_value`, `allowed_tiers`, `allowed_categories`, `require_proofs` |
-| `SessionReceipt` | Per-request settlement receipt | `session_id`, `request_hash`, `amount`, `agent_signature` |
+| Struct | Purpose | Key Fields | Status |
+|--------|---------|------------|--------|
+| `AgentReputation` | Agent's private reputation data | `agent_id`, `total_jobs`, `total_rating_points`, `total_revenue`, `tier` | Deployed |
+| `AgentBond` | Registration bond (returned on unregister) | `agent_id`, `amount`, `staked_at` | Deployed |
+| `RatingRecord` | Rating submission receipt | `client_nullifier`, `job_hash`, `rating`, `payment_amount`, `burn_proof` | Deployed |
+| `ReputationProof` | ZK proof of reputation | `proof_type`, `threshold_met`, `tier_proven` | Deployed |
+| `EscrowRecord` | HTLC escrow payment | `agent`, `amount`, `job_hash`, `deadline`, `secret_hash`, `status` | Deployed |
+| `PublicListing` | Agent's public marketplace listing | `agent_id`, `service_type`, `endpoint_hash`, `min_tier`, `is_active` | Deployed |
+| `PaymentSession` | Pre-authorized spending session | `max_total`, `max_per_request`, `rate_limit`, `spent`, `valid_until` | Designed, not deployed |
+| `SpendingPolicy` | Reusable authorization rules | `max_session_value`, `allowed_tiers`, `allowed_categories`, `require_proofs` | Designed, not deployed |
+| `SessionReceipt` | Per-request settlement receipt | `session_id`, `request_hash`, `amount`, `agent_signature` | Designed, not deployed |
 
 **Economic Constants:**
 
@@ -294,7 +298,9 @@ Client                      Agent Service               Blockchain
 
 ## Phase 5: Session-Based Payments
 
-**Status:** Completed
+**Status:** Designed (not deployed)
+
+> **Important:** The 6 session transitions described below are fully specified in the documentation but are **not present in the deployed `shadow_agent.aleo` contract**. The deployed contract contains 12 core transitions (Phases 1-4). Session-based payments will be implemented in a future deployment.
 
 **Objective:** Solve the fundamental x402 UX problem (1000 API calls = 1000 wallet signatures) by enabling "sign once, spend within bounds" sessions for high-frequency AI agent interactions.
 
@@ -334,7 +340,7 @@ Client                      Agent Service               Blockchain
 - 1000 requests = **1 settlement TX** (vs 1000 individual TXs)
 - Session activity stays **off-chain** until settlement (additional privacy)
 
-> **Note:** Session payments are implemented in the MVP smart contract (Doc 01, Section 9). The Future Implementation Plan (Doc 06, Section 3.2.2) covers **production-scale enhancements** such as tiered authorization and batch settlement optimization.
+> **Note:** Session payments are fully designed (Doc 01, Section 9) but **not yet deployed on-chain**. The deployed `shadow_agent.aleo` contract contains 12 core transitions (Phases 1-4). Session transitions will be added in a future contract deployment. The Future Implementation Plan (Doc 06, Section 3.2.2) covers production-scale enhancements.
 
 **Reference:** [01_Smart_Contract_Implementation.md](01_Smart_Contract_Implementation.md) -- Section 9 (Session-Based Payments), [06_Future_Implementation_Plan.md](06_Future_Implementation_Plan.md) -- Section 3.2.2 (Production Enhancements)
 
@@ -688,6 +694,65 @@ Frontend  -->  Facilitator API  -->  Aleo Blockchain
 
 ---
 
+## Phase 10a: Foundation Hardening — Implemented Features
+
+**Status:** Completed (deployed on Aleo Testnet)
+
+**Contract:** `shadow_agent_ext.aleo`
+**Deploy TX:** `at1fpwhdvs77vn37ngxrnty40qxsnwwuccu660e73f409nssjk3vyqqxpx647`
+
+Phase 10a implements four feature groups as a companion contract (`shadow_agent_ext.aleo`) with full-stack support across SDK, facilitator, and frontend.
+
+### Feature Groups
+
+| Feature | On-Chain Transitions | Facilitator Routes | Frontend Page |
+|---------|---------------------|-------------------|---------------|
+| Partial Refunds | `propose_partial_refund`, `accept_partial_refund`, `reject_partial_refund` | `POST /refunds`, `POST /refunds/:id/accept`, `POST /refunds/:id/reject` | DisputeCenter (Refunds tab) |
+| Dispute Resolution | `open_dispute`, `respond_to_dispute`, `resolve_dispute` | `POST /disputes`, `GET /disputes`, `POST /disputes/:id/respond`, `POST /disputes/:id/resolve` | DisputeCenter (Disputes tab) |
+| Reputation Decay | `prove_rating_decay`, `prove_tier_with_decay` | SDK `applyDecay()` utility | AgentDashboard (proof generation) |
+| Multi-Sig Escrow | `create_multisig_escrow`, `approve_escrow_release`, `refund_multisig_escrow` | `POST /escrows/multisig`, `GET /escrows/multisig/:id`, `POST /escrows/multisig/:id/approve` | ClientDashboard (MultiSigApprovalPanel) |
+
+### Extension Contract (11 Transitions)
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `propose_partial_refund` | Private | Client proposes an escrow split between agent and client |
+| `accept_partial_refund` | Private | Agent accepts the proposed refund split |
+| `reject_partial_refund` | Private | Agent rejects the proposed refund split |
+| `open_dispute` | Private + Finalize | Client opens a dispute with evidence hash |
+| `respond_to_dispute` | Private | Agent submits counter-evidence to dispute |
+| `resolve_dispute` | Private + Finalize | Arbitrator resolves dispute with percentage split |
+| `prove_rating_decay` | Private + Finalize | ZK prove decayed average rating >= threshold |
+| `prove_tier_with_decay` | Private + Finalize | ZK prove tier with decay-adjusted reputation |
+| `create_multisig_escrow` | Private | Create multi-signature escrow (2-of-3 or 3-of-3) |
+| `approve_escrow_release` | Private | Signer approves escrow release (requires secret) |
+| `refund_multisig_escrow` | Private + Finalize | Owner refunds expired multi-sig escrow |
+
+### Extension Records (4)
+
+| Record | Purpose |
+|--------|---------|
+| `SplitEscrowRecord` | Partial refund split tracking |
+| `DisputeRecord` | Dispute lifecycle state |
+| `DecayedReputationProof` | Decay-adjusted reputation ZK proof |
+| `MultiSigEscrowRecord` | Multi-signature escrow payment |
+
+### Extension Mapping
+
+| Mapping | Key | Value | Purpose |
+|---------|-----|-------|---------|
+| `active_disputes` | `field` | `boolean` | Track open disputes by job hash |
+
+### Combined On-Chain Summary
+
+| Metric | Core | Extension | Total |
+|--------|------|-----------|-------|
+| Transitions | 12 | 11 | **23** |
+| Mappings | 3 | 1 | **4** |
+| Records | 5 | 4 | **9** |
+
+---
+
 ## Cross-Reference Index
 
 | Document | Phases Covered | Key Content |
@@ -699,13 +764,13 @@ Frontend  -->  Facilitator API  -->  Aleo Blockchain
 | `05_Testing_Implementation.md` | 9 | Unit/integration/E2E tests, CI/CD, coverage |
 | `06_Future_Implementation_Plan.md` | 10 | 5 future sub-phases, business model, GTM, partnerships, KPIs |
 | `07_Technical_Flow_Diagrams.md` | 2, 3, 4, 5 | Registration, x402, escrow, rating, session, proof flows |
-| `Deployment_Status.md` | 2 | On-chain TX IDs, mappings, contract functions, network config |
+| `Deployment_Status.md` | 2, 10a | On-chain TX IDs, mappings, contract functions (core + extension), network config |
 
 ---
 
 ## Deployment Evidence
 
-### Verified On-Chain State
+### Core Contract
 
 **Contract:** `shadow_agent.aleo` on Aleo Testnet
 
@@ -719,7 +784,7 @@ Frontend  -->  Facilitator API  -->  Aleo Blockchain
 | `create_escrow` | `at197amq...efpp` | Confirmed |
 | `submit_rating` | `at1qv5p2...agqv` | Confirmed |
 
-**All 12 Contract Functions:**
+**Core Contract Functions (12):**
 
 | Function | Type |
 |----------|------|
@@ -736,13 +801,37 @@ Frontend  -->  Facilitator API  -->  Aleo Blockchain
 | `prove_rating` | Private |
 | `prove_revenue_range` | Private |
 
-**Network Configuration:**
+### Extension Contract (Phase 10a)
+
+**Contract:** `shadow_agent_ext.aleo` on Aleo Testnet
+
+**Deployment TX:** `at1fpwhdvs77vn37ngxrnty40qxsnwwuccu660e73f409nssjk3vyqqxpx647`
+
+**Extension Contract Functions (11):**
+
+| Function | Type |
+|----------|------|
+| `propose_partial_refund` | Private |
+| `accept_partial_refund` | Private |
+| `reject_partial_refund` | Private |
+| `open_dispute` | Private + Finalize |
+| `respond_to_dispute` | Private |
+| `resolve_dispute` | Private + Finalize |
+| `prove_rating_decay` | Private + Finalize |
+| `prove_tier_with_decay` | Private + Finalize |
+| `create_multisig_escrow` | Private |
+| `approve_escrow_release` | Private |
+| `refund_multisig_escrow` | Private + Finalize |
+
+### Network Configuration
 
 | Setting | Value |
 |---------|-------|
 | Network | Aleo Testnet |
 | RPC | `https://api.explorer.provable.com/v1` |
 | Explorer | `https://explorer.aleo.org` |
+
+**Total on-chain:** 23 transitions, 4 mappings, 9 records across 2 deployed contracts.
 
 ---
 
