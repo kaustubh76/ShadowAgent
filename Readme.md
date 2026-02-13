@@ -63,8 +63,10 @@ Instead of expensive loops through individual jobs, we use cumulative statistics
 | Layer | Mechanism | Attack Cost |
 |-------|-----------|-------------|
 | **Economic** | Burn-to-Rate: 0.5 credits per rating | 1000 fake ratings = 500+ credits |
-| **Identity** | zPass: One credential per agent | Cannot create infinite agents |
+| **Identity** | Bond staking: 10 credits per agent | Cannot create infinite agents |
 | **Payment** | Minimum $0.10 per rated job | Dust transactions excluded |
+
+> **Note:** zPass integration for one-credential-per-agent Sybil resistance is *planned* for a future release. The current deployed contract uses bond staking (10 credits) as the identity layer.
 
 ### 4. Private Escrow (HTLC)
 Fair exchange without trusted intermediaries:
@@ -79,6 +81,8 @@ Public listings with private backing data:
 - **PRIVATE**: Job details, revenue amounts, client identities, rating values
 
 ### 6. Session-Based Payments (Scalable Micropayments)
+> **Designed — not yet implemented on-chain.** The session model below is fully specified but the 6 session transitions have not been deployed to the `shadow_agent.aleo` contract. They will be added in a future contract deployment.
+
 **The killer feature for autonomous AI economies** - Sign once, spend unlimited times within bounds:
 
 ```
@@ -132,38 +136,44 @@ Standard HTTP 402 flow with private Aleo escrows:
 
 ### Smart Contract Records
 
-| Record | Visibility | Purpose |
-|--------|------------|---------|
-| `AgentReputation` | Private | Cumulative reputation stats |
-| `RatingRecord` | Private | Individual job rating |
-| `EscrowRecord` | Private | Locked payment for fair exchange |
-| `ReputationProof` | Private | ZK attestation output |
-| `PaymentSession` | Private | Pre-authorized spending bounds |
-| `SessionReceipt` | Private | Per-request tracking for batch settlement |
+| Record | Contract | Visibility | Purpose |
+|--------|----------|------------|---------|
+| `AgentReputation` | Core | Private | Cumulative reputation stats |
+| `AgentBond` | Core | Private | Registration bond stake |
+| `RatingRecord` | Core | Private | Individual job rating |
+| `EscrowRecord` | Core | Private | Locked payment for fair exchange |
+| `ReputationProof` | Core | Private | ZK attestation output |
+| `SplitEscrowRecord` | Extension | Private | Partial refund split tracking |
+| `DisputeRecord` | Extension | Private | Dispute lifecycle state |
+| `DecayedReputationProof` | Extension | Private | Decay-adjusted ZK proof |
+| `MultiSigEscrowRecord` | Extension | Private | Multi-sig escrow payment |
+
+> **Session records** (`PaymentSession`, `SpendingPolicy`, `SessionReceipt`) are designed but not yet deployed on-chain.
 
 ### On-Chain Mappings
 
-| Mapping | Purpose |
-|---------|---------|
-| `agent_listings` | Public discovery (agent_id → PublicListing) |
-| `used_nullifiers` | Double-rating prevention |
-| `verified_identities` | zPass Sybil resistance |
+| Mapping | Contract | Purpose |
+|---------|----------|---------|
+| `agent_listings` | Core | Public discovery (agent_id → PublicListing) |
+| `registered_agents` | Core | Agent registration check (1 per address) |
+| `used_nullifiers` | Core | Double-rating prevention |
+| `active_disputes` | Extension | Track open disputes by job hash |
 
 ### Core Transitions
 
 | Transition | Purpose |
 |------------|---------|
-| `register_agent` | Register with zPass verification |
+| `register_agent` | Register with bond (10 credits) |
 | `submit_rating` | Submit rating with burn mechanism |
 | `update_reputation` | Agent incorporates rating (O(1)) |
 | `prove_tier/rating/jobs/revenue` | Generate ZK proofs |
 | `create_escrow` | Lock payment for service |
 | `claim_escrow` | Agent claims with secret |
 | `refund_escrow` | Client reclaims after timeout |
-| `create_session` | Initialize payment session |
-| `session_request` | Process request within session |
-| `settle_session` | Batch settle to blockchain |
-| `close_session` | End session, refund unused |
+
+> **Extension contract** (`shadow_agent_ext.aleo`): 11 additional transitions for disputes, partial refunds, reputation decay, and multi-sig escrow. See [Deployment_Status.md](docs/Deployment_Status.md).
+>
+> **Session transitions** (`create_session`, `session_request`, `settle_session`, `close_session`, `pause_session`, `resume_session`) are designed but not yet deployed on-chain.
 
 ---
 
@@ -192,28 +202,9 @@ const response = await client.request('https://agent.example.com/api/analyze', {
   body: JSON.stringify({ text: 'Hello world' }),
 });
 
-// Option 2: Session-based payment (recommended for high-frequency use)
-const session = await client.createSession({
-  agent: 'aleo1agent...',
-  maxTotal: 100_000_000n,     // $100 max
-  maxPerRequest: 1_000_000n,  // $1 per request max
-  rateLimit: 100n,            // 100 requests per rate window
-  durationBlocks: 1000,       // ~24 hours
-});
-
-// Make unlimited requests within session bounds - NO wallet signatures!
-for (let i = 0; i < 1000; i++) {
-  const { response, updatedSession } = await client.sessionRequest(
-    session,
-    'https://agent.example.com/api/analyze',
-    { method: 'POST', body: JSON.stringify({ text: `Request ${i}` }) }
-  );
-  session = updatedSession;
-}
-
-// Close session when done
-const { refundAmount } = await client.closeSession(session);
-console.log(`Refunded: $${Number(refundAmount) / 1_000_000}`);
+// Option 2: Session-based payment (COMING SOON - not yet deployed on-chain)
+// Sessions will enable 1000 API calls with 1 wallet signature.
+// See docs/01_Smart_Contract_Implementation.md Section 9 for the full design.
 ```
 
 ### Agent SDK
@@ -230,8 +221,8 @@ const agent = new ShadowAgentServer({
   pricePerRequest: 100_000, // $0.10
 });
 
-// Register on marketplace
-await agent.register('zpass_credential_hash');
+// Register on marketplace (stakes 10-credit bond)
+await agent.register();
 
 // Apply payment middleware (supports both escrow and session payments)
 app.use('/api', shadowAgentMiddleware({ agent, pricePerRequest: 100_000 }));
@@ -300,16 +291,17 @@ const proof = await agent.proveReputation(ProofType.Tier, Tier.Silver);
 
 | Wave | Focus | Status |
 |------|-------|--------|
-| **1** | Core Records (AgentReputation, RatingRecord) | ✅ |
-| **2** | Agent Registration with zPass | ✅ |
-| **3** | Rating System with Burn Mechanism | ✅ |
-| **4** | Rolling Reputation Update (O(1)) | ✅ |
-| **5** | Proof Generation (tier, rating, jobs, revenue) | ✅ |
-| **6** | Escrow System (HTLC) | ✅ |
-| **7** | Session-Based Payments | ✅ |
-| **8** | TypeScript SDK | ✅ |
-| **9** | Demo UI | 🔄 |
-| **10** | Polish & Presentation | 🔄 |
+| **1** | Core Records (AgentReputation, RatingRecord) | Deployed |
+| **2** | Agent Registration with Bond | Deployed |
+| **3** | Rating System with Burn Mechanism | Deployed |
+| **4** | Rolling Reputation Update (O(1)) | Deployed |
+| **5** | Proof Generation (tier, rating, jobs, revenue) | Deployed |
+| **6** | Escrow System (HTLC) | Deployed |
+| **7** | Session-Based Payments | Designed |
+| **8** | TypeScript SDK | Deployed |
+| **9** | Frontend Application | Deployed |
+| **10** | Future Roadmap & Scaling | Planned |
+| **10a** | Foundation Hardening (disputes, refunds, decay, multi-sig) | Deployed |
 
 ---
 
@@ -319,7 +311,7 @@ This architecture is **impossible on public chains**. Aleo uniquely enables:
 
 - **Private Records**: Reputation data never touches public state
 - **Selective Disclosure**: Prove thresholds without revealing values
-- **zPass Integration**: Sybil-resistant identity verification
+- **Bond-Based Sybil Resistance**: 10-credit economic barrier per agent registration
 - **Native ZK**: First-class support for zero-knowledge proofs
 
 ---
@@ -332,7 +324,7 @@ This architecture is **impossible on public chains**. Aleo uniquely enables:
 >
 > Agents prove 'Gold tier, 4.8 stars, $50k revenue' **without revealing a single client or job**.
 >
-> Three layers of Sybil resistance: burn-to-rate, zPass identity, and payment-weighted ratings.
+> Three layers of Sybil resistance: burn-to-rate, bond staking, and payment-weighted ratings.
 >
 > Session-based payments enable **1000 API calls with 1 wallet signature** — making autonomous AI economies practical.
 >
@@ -375,7 +367,7 @@ npm install
 # Terminal 1: Start the facilitator service
 cd shadow-facilitator
 npm run dev
-# Runs on http://localhost:3000
+# Runs on http://localhost:3001
 
 # Terminal 2: Start the frontend
 cd shadow-frontend
@@ -393,31 +385,33 @@ Create `.env` files in each project:
 
 **shadow-facilitator/.env**
 ```
-PORT=3000
-ALEO_RPC_URL=https://api.explorer.aleo.org/v1
+PORT=3001
+ALEO_RPC_URL=https://api.explorer.provable.com/v1
 PROGRAM_ID=shadow_agent.aleo
 NODE_ENV=development
 ```
 
 **shadow-frontend/.env**
 ```
-VITE_API_URL=http://localhost:3000
+VITE_API_URL=/api
+VITE_FACILITATOR_URL=http://localhost:3001
 ```
 
 ## Project Structure
 
 ```
 Aleo/
-├── shadow_agent/              # Leo smart contract
-│   ├── src/main.leo          # Core contract (complete)
+├── shadow_agent/              # Leo core contract (12 transitions)
+│   ├── src/main.leo          # Core contract
+│   └── program.json
+├── shadow_agent_ext/          # Leo extension contract (11 transitions, Phase 10a)
+│   ├── src/main.leo          # Disputes, refunds, decay, multi-sig
 │   └── program.json
 ├── shadow-facilitator/        # Off-chain service (Node.js/Express)
 │   ├── src/
-│   │   ├── index.ts          # Main server
-│   │   ├── types.ts          # TypeScript types
-│   │   ├── routes/           # API routes
-│   │   ├── services/         # Aleo & Indexer services
-│   │   └── middleware/       # x402 payment middleware
+│   │   ├── index.ts          # Main server (port 3001)
+│   │   ├── routes/           # API routes (agents, disputes, refunds, multisig)
+│   │   └── services/         # Aleo, Redis, indexer services
 │   └── package.json
 ├── shadow-sdk/                # TypeScript SDK
 │   ├── src/
@@ -442,8 +436,8 @@ Aleo/
 │   ├── 04_Frontend_Implementation.md
 │   ├── 05_Testing_Implementation.md
 │   ├── 06_Future_Implementation_Plan.md
-│   └── 07_Technical_Flow_Diagrams.md   # NEW: Comprehensive flow diagrams
-├── Technical_Docs.md          # Complete technical specification
+│   ├── 07_Technical_Flow_Diagrams.md   # Comprehensive flow diagrams
+│   └── Deployment_Status.md            # On-chain deployment evidence
 └── README.md
 ```
 
@@ -470,7 +464,7 @@ Aleo/
 | **UX** | 10/10 | Session payments solve micropayment UX |
 | **Practical** | 10/10 | Improves on hackathon winner (Amiko) |
 | **Novel** | 10/10 | First ZK reputation + sessions for AI agents |
-| **Aleo Alignment** | 10/10 | Uses zPass, showcases unique capabilities |
+| **Aleo Alignment** | 10/10 | Bond staking, ZK proofs, private records, showcases unique capabilities |
 | **Demo-ability** | 10/10 | Clear visual: public tier, private data |
 
 ---
