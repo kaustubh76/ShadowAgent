@@ -1,0 +1,6 @@
+{
+  "program": "shadow_agent_session.aleo",
+  "version": "0.1.0",
+  "description": "ShadowAgent session-based payments: pre-authorized spending sessions for autonomous AI agent interactions",
+  "license": "MIT"
+}
