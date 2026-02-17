@@ -6,6 +6,14 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-surface-0 relative">
+      {/* Skip to main content link for keyboard/screen reader users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-shadow-600 focus:text-white focus:text-sm focus:font-medium focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
+
       {/* Ambient background layers */}
       <div className="mesh-bg" />
       <div className="grid-pattern" />
@@ -15,7 +23,7 @@ export default function Layout() {
       <div className="relative z-10">
         <Header />
         <div className="divider-glow" />
-        <main key={location.pathname} className="container mx-auto px-4 sm:px-6 lg:px-8 py-10 animate-fade-in">
+        <main id="main-content" key={location.pathname} className="container mx-auto px-4 sm:px-6 lg:px-8 py-10 animate-fade-in">
           <Outlet />
         </main>
         <footer className="relative border-t border-white/[0.04] mt-auto">
