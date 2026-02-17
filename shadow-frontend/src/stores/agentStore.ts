@@ -2,6 +2,7 @@
 // Types defined locally to avoid eager SDK imports that trigger WASM loading
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 // Local enums mirroring SDK values (avoids WASM import chain)
 export enum ServiceType {
@@ -167,7 +168,9 @@ interface AgentState {
   clearTransactions: () => void;
 }
 
-export const useAgentStore = create<AgentState>((set) => ({
+export const useAgentStore = create<AgentState>()(
+  persist(
+    (set) => ({
   // Initial state
   isRegistered: false,
   agentId: null,
@@ -256,7 +259,18 @@ export const useAgentStore = create<AgentState>((set) => ({
     })),
 
   clearTransactions: () => set({ transactions: [] }),
-}));
+    }),
+    {
+      name: 'shadow-agent-store',
+      partialize: (state) => ({
+        isRegistered: state.isRegistered,
+        agentId: state.agentId,
+        reputation: state.reputation,
+        filters: state.filters,
+      }),
+    }
+  )
+);
 
 // Helper functions
 export function getTierName(tier: Tier): string {
