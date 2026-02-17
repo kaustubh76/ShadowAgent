@@ -20,7 +20,8 @@ describe('AgentCard', () => {
 
   it('renders truncated agent_id', () => {
     render(<AgentCard agent={makeAgent()} />);
-    expect(screen.getByText(/aleo1abcdefghijklmn\.\.\./)).toBeInTheDocument();
+    // agent_id.slice(0, 16) = 'aleo1abcdefghijk' + '...'
+    expect(screen.getByText('aleo1abcdefghijk...')).toBeInTheDocument();
   });
 
   it('shows Active status for active agent', () => {

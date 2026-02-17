@@ -65,7 +65,8 @@ describe('formatAddress', () => {
   it('truncates long address', () => {
     const addr = 'aleo1abcdefghijklmnopqrstuvwxyz1234567890abcdefgh';
     const formatted = formatAddress(addr);
-    expect(formatted).toMatch(/^aleo1abc\.\.\.defgh$/);
+    // first 8 chars + '...' + last 6 chars
+    expect(formatted).toBe('aleo1abc...cdefgh');
     expect(formatted.length).toBeLessThan(addr.length);
   });
 

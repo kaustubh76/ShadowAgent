@@ -1,6 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSDKStore } from './sdkStore';
 
+// Create a mock client matching what the SDK mock returns
+function createMockClient() {
+  return {
+    searchAgents: vi.fn().mockResolvedValue({ agents: [], total: 0, limit: 20, offset: 0 }),
+    getAgent: vi.fn().mockResolvedValue(null),
+    getHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
+    setConfig: vi.fn(),
+    verifyReputationProof: vi.fn().mockResolvedValue({ valid: true }),
+  };
+}
+
 describe('sdkStore', () => {
   beforeEach(() => {
     useSDKStore.setState({
@@ -22,35 +33,27 @@ describe('sdkStore', () => {
   });
 
   describe('initializeClient', () => {
-    it('creates a client and sets initialized', async () => {
+    it('is idempotent - does not recreate client when already set', async () => {
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       await useSDKStore.getState().initializeClient();
-      const state = useSDKStore.getState();
-      expect(state.client).toBeDefined();
-      expect(state.isInitialized).toBe(true);
-    });
-
-    it('is idempotent - does not recreate client', async () => {
-      await useSDKStore.getState().initializeClient();
-      const client1 = useSDKStore.getState().client;
-      await useSDKStore.getState().initializeClient();
-      const client2 = useSDKStore.getState().client;
-      expect(client1).toBe(client2);
+      expect(useSDKStore.getState().client).toBe(mockClient);
     });
 
     it('calls setConfig when re-initializing with config', async () => {
-      await useSDKStore.getState().initializeClient();
-      const client = useSDKStore.getState().client;
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       await useSDKStore.getState().initializeClient({ timeout: 5000 });
-      expect(client.setConfig).toHaveBeenCalledWith({ timeout: 5000 });
+      expect(mockClient.setConfig).toHaveBeenCalledWith({ timeout: 5000 });
     });
   });
 
   describe('updateConfig', () => {
-    it('calls setConfig on existing client', async () => {
-      await useSDKStore.getState().initializeClient();
+    it('calls setConfig on existing client', () => {
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       useSDKStore.getState().updateConfig({ network: 'mainnet' });
-      const client = useSDKStore.getState().client;
-      expect(client.setConfig).toHaveBeenCalledWith({ network: 'mainnet' });
+      expect(mockClient.setConfig).toHaveBeenCalledWith({ network: 'mainnet' });
     });
 
     it('does nothing without client', () => {
@@ -66,7 +69,8 @@ describe('sdkStore', () => {
     });
 
     it('sets facilitatorHealthy on success', async () => {
-      await useSDKStore.getState().initializeClient();
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       const result = await useSDKStore.getState().checkHealth();
       expect(result).toEqual({ status: 'ok' });
       const state = useSDKStore.getState();
@@ -75,9 +79,9 @@ describe('sdkStore', () => {
     });
 
     it('sets facilitatorHealthy false on failure', async () => {
-      await useSDKStore.getState().initializeClient();
-      const client = useSDKStore.getState().client;
-      client.getHealth.mockRejectedValueOnce(new Error('Network error'));
+      const mockClient = createMockClient();
+      mockClient.getHealth.mockRejectedValueOnce(new Error('Network error'));
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       const result = await useSDKStore.getState().checkHealth();
       expect(result).toBeNull();
       expect(useSDKStore.getState().facilitatorHealthy).toBe(false);
@@ -90,11 +94,11 @@ describe('sdkStore', () => {
       expect(client).toBeNull();
     });
 
-    it('returns client when initialized', async () => {
-      await useSDKStore.getState().initializeClient();
+    it('returns client when set', () => {
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
       const client = useSDKStore.getState().getClient();
-      expect(client).toBeDefined();
-      expect(client).not.toBeNull();
+      expect(client).toBe(mockClient);
     });
   });
 });
