@@ -9,12 +9,8 @@ program shadow_agent_session.aleo {
     // CONSTRUCTOR (required for deployment on Aleo testnet)
     // ═══════════════════════════════════════════════════════════════════
 
-    async transition constructor() -> Future {
-        return finalize_constructor();
-    }
-
-    async function finalize_constructor() {
-        // No-op: program state is initialized via mappings on first use
+    @noupgrade
+    async constructor() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
