@@ -211,24 +211,137 @@ describe('Agent Routes', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // Existing GET routes (sanity check)
+  // GET /agents - Search with filters
   // ═══════════════════════════════════════════════════════════════════
 
   describe('GET /agents', () => {
-    it('should return agent search results', async () => {
+    it('should return agent search results with default params', async () => {
       const app = createApp();
       const res = await request(app).get('/agents');
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('agents');
       expect(res.body).toHaveProperty('total');
+      expect(res.body).toHaveProperty('limit');
+      expect(res.body).toHaveProperty('offset');
+      expect(Array.isArray(res.body.agents)).toBe(true);
+    });
+
+    it('should accept service_type filter parameter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?service_type=1');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('agents');
+      expect(res.body).toHaveProperty('total');
+    });
+
+    it('should accept min_tier filter parameter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?min_tier=2');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('agents');
+      expect(res.body).toHaveProperty('total');
+    });
+
+    it('should accept combined service_type and min_tier filters', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?service_type=3&min_tier=1');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('agents');
+      expect(res.body).toHaveProperty('total');
+    });
+
+    it('should respect limit parameter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?limit=5');
+
+      expect(res.status).toBe(200);
+      expect(res.body.limit).toBe(5);
+    });
+
+    it('should respect offset parameter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?offset=10');
+
+      expect(res.status).toBe(200);
+      expect(res.body.offset).toBe(10);
+    });
+
+    it('should cap limit at 100', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?limit=500');
+
+      expect(res.status).toBe(200);
+      expect(res.body.limit).toBe(100);
+    });
+
+    it('should default limit to 20 when not specified', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents');
+
+      expect(res.status).toBe(200);
+      expect(res.body.limit).toBe(20);
+    });
+
+    it('should default offset to 0 when not specified', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents');
+
+      expect(res.status).toBe(200);
+      expect(res.body.offset).toBe(0);
+    });
+
+    it('should accept is_active=false filter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?is_active=false');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('agents');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GET /agents/:agentId - Get specific agent
+  // ═══════════════════════════════════════════════════════════════════
 
   describe('GET /agents/:agentId', () => {
     it('should return 404 for non-existent agent', async () => {
       const app = createApp();
       const res = await request(app).get('/agents/nonexistent_agent_id');
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain('Agent not found');
+    });
+
+    it('should return 404 with proper error message structure', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents/unknown_agent_xyz');
+
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error');
+      expect(typeof res.body.error).toBe('string');
+    });
+
+    it('should handle special characters in agent ID', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents/aleo1test_special_chars_123');
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain('Agent not found');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GET /agents/:agentId/proof - Get agent proof
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('GET /agents/:agentId/proof', () => {
+    it('should return 404 for non-existent agent proof', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents/unknown_agent/proof');
 
       expect(res.status).toBe(404);
       expect(res.body.error).toContain('Agent not found');
