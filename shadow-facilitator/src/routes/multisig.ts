@@ -106,6 +106,20 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// GET /escrows/pending/:address - Get escrows awaiting this address's signature
+// NOTE: Must be registered BEFORE /:jobHash to avoid Express matching "pending" as a jobHash
+router.get('/pending/:address', async (req: Request, res: Response) => {
+  const { address } = req.params;
+
+  const pending = Array.from(multisigStore.values()).filter(escrow => {
+    if (escrow.status !== 'locked') return false;
+    const signerIndex = escrow.signers.indexOf(address);
+    return signerIndex !== -1 && !escrow.approvals[signerIndex];
+  });
+
+  res.json(pending);
+});
+
 // GET /escrows/multisig/:jobHash - Get multi-sig escrow status
 router.get('/:jobHash', async (req: Request, res: Response) => {
   const { jobHash } = req.params;
@@ -171,19 +185,6 @@ router.post('/:jobHash/approve', async (req: Request, res: Response) => {
       threshold_met: escrow.sig_count >= escrow.required_sigs,
     });
   });
-});
-
-// GET /escrows/pending/:address - Get escrows awaiting this address's signature
-router.get('/pending/:address', async (req: Request, res: Response) => {
-  const { address } = req.params;
-
-  const pending = Array.from(multisigStore.values()).filter(escrow => {
-    if (escrow.status !== 'locked') return false;
-    const signerIndex = escrow.signers.indexOf(address);
-    return signerIndex !== -1 && !escrow.approvals[signerIndex];
-  });
-
-  res.json(pending);
 });
 
 export default router;
