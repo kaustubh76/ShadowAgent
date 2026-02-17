@@ -47,6 +47,60 @@ function getRefundStatusColor(status: RefundInfo['status']) {
   }
 }
 
+function DisputeTimeline({ status }: { status: DisputeInfo['status'] }) {
+  const steps = [
+    { label: 'Opened', key: 'opened' },
+    { label: 'Responded', key: 'agent_responded' },
+    { label: 'Resolved', key: 'resolved' },
+  ];
+
+  const getStepState = (stepKey: string) => {
+    const resolved = status.startsWith('resolved');
+    if (stepKey === 'opened') return true; // Always reached
+    if (stepKey === 'agent_responded') return status === 'agent_responded' || resolved;
+    if (stepKey === 'resolved') return resolved;
+    return false;
+  };
+
+  const isCurrent = (stepKey: string) => {
+    const resolved = status.startsWith('resolved');
+    if (stepKey === 'opened' && status === 'opened') return true;
+    if (stepKey === 'agent_responded' && status === 'agent_responded') return true;
+    if (stepKey === 'resolved' && resolved) return true;
+    return false;
+  };
+
+  return (
+    <div className="flex items-center gap-0 mt-3 pt-3 border-t border-white/[0.04]" aria-label="Dispute progress">
+      {steps.map((step, i) => {
+        const completed = getStepState(step.key);
+        const active = isCurrent(step.key);
+        return (
+          <div key={step.key} className="flex items-center">
+            {i > 0 && (
+              <div className={`w-8 h-0.5 ${completed ? 'bg-shadow-500' : 'bg-white/[0.06]'}`} />
+            )}
+            <div className="flex flex-col items-center gap-1">
+              <div
+                className={`w-3 h-3 rounded-full border-2 transition-colors ${
+                  completed
+                    ? active
+                      ? 'bg-shadow-500 border-shadow-400 shadow-[0_0_6px_rgba(139,92,246,0.4)]'
+                      : 'bg-shadow-500/60 border-shadow-500/40'
+                    : 'bg-transparent border-white/[0.1]'
+                }`}
+              />
+              <span className={`text-[10px] ${completed ? 'text-gray-300' : 'text-gray-600'}`}>
+                {step.label}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function DisputeCenter() {
   const { connected, address } = useWalletStore();
   const { disputes } = useAgentStore();
@@ -172,10 +226,12 @@ export default function DisputeCenter() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.04] mb-6 w-fit">
+      <div role="tablist" aria-label="Dispute filters" className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.04] mb-6 w-fit">
         {(['all', 'open', 'resolved', 'refunds'] as const).map(f => (
           <button
             key={f}
+            role="tab"
+            aria-selected={filter === f}
             onClick={() => setFilter(f)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
               filter === f
@@ -359,8 +415,11 @@ export default function DisputeCenter() {
                     </div>
                   )}
 
+                  {/* Dispute Timeline */}
+                  <DisputeTimeline status={dispute.status} />
+
                   {dispute.opened_at && !respondingTo && (
-                    <p className="text-xs text-gray-600 mt-3 pt-3 border-t border-white/[0.04]">
+                    <p className="text-xs text-gray-600 mt-2">
                       Opened: {new Date(dispute.opened_at).toLocaleString()}
                     </p>
                   )}
