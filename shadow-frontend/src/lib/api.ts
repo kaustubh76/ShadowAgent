@@ -65,6 +65,43 @@ function getClient() {
 // Empty result when facilitator is unavailable
 const EMPTY_SEARCH: SearchResult = { agents: [], total: 0, limit: 20, offset: 0 };
 
+// ═══════════════════════════════════════════════════════════════════
+// Retry + Cache helpers
+// ═══════════════════════════════════════════════════════════════════
+
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  retries = 2,
+  delay = 1000
+): Promise<Response> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status < 500) return response;
+      if (i < retries) await new Promise(r => setTimeout(r, delay * (i + 1)));
+    } catch (err) {
+      if (i === retries) throw err;
+      await new Promise(r => setTimeout(r, delay * (i + 1)));
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
+const _cache = new Map<string, { data: unknown; ts: number }>();
+const CACHE_TTL = 30_000; // 30 seconds
+
+function getCached<T>(key: string): T | null {
+  const entry = _cache.get(key);
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data as T;
+  _cache.delete(key);
+  return null;
+}
+
+function setCache(key: string, data: unknown) {
+  _cache.set(key, { data, ts: Date.now() });
+}
+
 // Search for agents - uses SDK client if available
 export async function searchAgents(
   filters: SearchFilters,
@@ -104,13 +141,19 @@ export async function searchAgents(
     params.set('limit', String(limit));
     params.set('offset', String(offset));
 
-    const response = await fetch(`${API_BASE}/agents?${params.toString()}`);
+    const url = `${API_BASE}/agents?${params.toString()}`;
+    const cached = getCached<SearchResult>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) {
       return { ...EMPTY_SEARCH, limit, offset };
     }
 
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return { ...EMPTY_SEARCH, limit, offset };
   }
@@ -127,13 +170,19 @@ export async function getAgent(agentId: string): Promise<AgentListing | null> {
       return await client.getAgent(agentId);
     }
 
-    const response = await fetch(`${API_BASE}/agents/${agentId}`);
+    const url = `${API_BASE}/agents/${agentId}`;
+    const cached = getCached<AgentListing>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) {
       return null;
     }
 
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return null;
   }
@@ -179,10 +228,16 @@ export async function fetchDisputes(
     if (params?.status) searchParams.set('status', params.status);
 
     const qs = searchParams.toString();
-    const response = await fetch(`${API_BASE}/disputes${qs ? `?${qs}` : ''}`);
+    const url = `${API_BASE}/disputes${qs ? `?${qs}` : ''}`;
+    const cached = getCached<DisputeInfo[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) return [];
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return [];
   }
@@ -229,10 +284,16 @@ export async function fetchRefunds(
     if (params?.status) searchParams.set('status', params.status);
 
     const qs = searchParams.toString();
-    const response = await fetch(`${API_BASE}/refunds${qs ? `?${qs}` : ''}`);
+    const url = `${API_BASE}/refunds${qs ? `?${qs}` : ''}`;
+    const cached = getCached<RefundInfo[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) return [];
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return [];
   }
@@ -272,9 +333,15 @@ export async function fetchMultiSigEscrow(jobHash: string): Promise<MultiSigEscr
   if (!FACILITATOR_ENABLED) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/escrows/multisig/${jobHash}`);
+    const url = `${API_BASE}/escrows/multisig/${jobHash}`;
+    const cached = getCached<MultiSigEscrowData>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
     if (!response.ok) return null;
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return null;
   }
@@ -496,9 +563,15 @@ export async function getSession(sessionId: string): Promise<SessionInfo | null>
   if (!FACILITATOR_ENABLED) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`);
+    const url = `${API_BASE}/sessions/${sessionId}`;
+    const cached = getCached<SessionInfo>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
     if (!response.ok) return null;
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return null;
   }
@@ -517,10 +590,16 @@ export async function listSessions(
     if (params?.status) searchParams.set('status', params.status);
 
     const qs = searchParams.toString();
-    const response = await fetch(`${API_BASE}/sessions${qs ? `?${qs}` : ''}`);
+    const url = `${API_BASE}/sessions${qs ? `?${qs}` : ''}`;
+    const cached = getCached<SessionInfo[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) return [];
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return [];
   }
@@ -652,10 +731,16 @@ export async function listPolicies(
     if (params?.owner) searchParams.set('owner', params.owner);
 
     const qs = searchParams.toString();
-    const response = await fetch(`${API_BASE}/sessions/policies${qs ? `?${qs}` : ''}`);
+    const url = `${API_BASE}/sessions/policies${qs ? `?${qs}` : ''}`;
+    const cached = getCached<PolicyInfo[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
 
     if (!response.ok) return [];
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return [];
   }
@@ -666,9 +751,15 @@ export async function getPolicy(policyId: string): Promise<PolicyInfo | null> {
   if (!FACILITATOR_ENABLED) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/policies/${policyId}`);
+    const url = `${API_BASE}/sessions/policies/${policyId}`;
+    const cached = getCached<PolicyInfo>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
     if (!response.ok) return null;
-    return response.json();
+    const result = await response.json();
+    setCache(url, result);
+    return result;
   } catch {
     return null;
   }
