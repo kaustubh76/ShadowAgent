@@ -595,3 +595,322 @@ describe('ShadowAgentClient', () => {
   });
 });
 
+
+// Additional tests for request, createEscrow, verifyReputationProof, getConfig, setConfig
+
+describe('ShadowAgentClient - additional methods', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  describe('request', () => {
+    it('should return data on a 200 response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ answer: 'Hello from the agent' }),
+      });
+
+      const client = createClient({ facilitatorUrl: 'http://localhost:3000' });
+      const result = await client.request<{ answer: string }>(
+        'http://agent.example.com/api/chat',
+        { method: 'POST', body: { message: 'Hi' } }
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ answer: 'Hello from the agent' });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://agent.example.com/api/chat',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+    it('should handle 402 Payment Required when no private key is set', async () => {
+      const { encodeBase64 } = await import('./crypto');
+      const paymentTerms = {
+        price: 50000,
+        network: 'testnet',
+        address: 'aleo1agentaddr',
+        escrow_required: true,
+        secret_hash: 'abc123',
+        deadline_blocks: 100,
+      };
+
+      const headersMap = new Map([
+        ['X-Payment-Required', encodeBase64(paymentTerms)],
+        ['X-Job-Hash', 'jobhash_402'],
+      ]);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 402,
+        statusText: 'Payment Required',
+        headers: { get: (key: string) => headersMap.get(key) || null },
+        json: () => Promise.resolve({}),
+      });
+
+      const client = createClient({ facilitatorUrl: 'http://localhost:3000' });
+      const result = await client.request('http://agent.example.com/api/chat');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    it('should return error details on non-402 errors', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: () => Promise.resolve({ error: 'Something went wrong' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api/chat');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Something went wrong');
+    });
+
+    it('should return statusText when response body has no error field', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        json: () => Promise.resolve({}),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api/chat');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Service Unavailable');
+    });
+
+    it('should handle network errors gracefully', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      const client = createClient();
+      const result = await client.request('http://unreachable.example.com', {
+        maxRetries: 0,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Network error');
+    });
+    it('should retry on failure when maxRetries > 0', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Temporary failure'));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ result: 'ok' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api', {
+        maxRetries: 1,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ result: 'ok' });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should use GET method by default', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: 'test' }),
+      });
+
+      const client = createClient();
+      await client.request('http://agent.example.com/api');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://agent.example.com/api',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+  });
+
+  describe('createEscrow', () => {
+    it('should create escrow proof with correct structure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('0'),
+      });
+
+      const client = createClient({ privateKey: 'test-key' });
+      const paymentTerms = {
+        price: 100000,
+        network: 'testnet',
+        address: 'aleo1recipientaddr',
+        escrow_required: true,
+        secret_hash: 'termsecret',
+        deadline_blocks: 200,
+      };
+
+      const proof = await client.createEscrow(paymentTerms, 'job_hash_123');
+
+      expect(proof).toHaveProperty('proof');
+      expect(proof).toHaveProperty('nullifier');
+      expect(proof).toHaveProperty('commitment');
+      expect(proof).toHaveProperty('amount', 100000);
+      expect(typeof proof.proof).toBe('string');
+      expect(typeof proof.nullifier).toBe('string');
+      expect(typeof proof.commitment).toBe('string');
+    });
+    it('should store escrow secret for later retrieval', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('0'),
+      });
+
+      const client = createClient({ privateKey: 'test-key' });
+      const paymentTerms = {
+        price: 50000,
+        network: 'testnet',
+        address: 'aleo1agent',
+        escrow_required: true,
+        secret_hash: 'shash',
+        deadline_blocks: 100,
+      };
+
+      await client.createEscrow(paymentTerms, 'job_for_secret');
+
+      const secret = client.getEscrowSecret('job_for_secret');
+      expect(secret).toBeDefined();
+      expect(typeof secret).toBe('string');
+      expect(secret!.length).toBe(64);
+    });
+  });
+
+  describe('verifyReputationProof', () => {
+    it('should verify a valid reputation proof', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ valid: true, tier: 3 }),
+      });
+
+      const client = createClient({ facilitatorUrl: 'http://localhost:3000' });
+      const result = await client.verifyReputationProof({
+        proof_type: 1,
+        threshold: 40,
+        proof: 'base64encodedproof',
+        tier: 3,
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.tier).toBe(3);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/verify/reputation'),
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('should pass required_threshold to the facilitator', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ valid: true }),
+      });
+
+      const client = createClient({ facilitatorUrl: 'http://localhost:3000' });
+      await client.verifyReputationProof(
+        { proof_type: 2, threshold: 50, proof: 'proof_data' },
+        60
+      );
+
+      const fetchCall = mockFetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.required_threshold).toBe(60);
+      expect(body.proof_type).toBe(2);
+      expect(body.threshold).toBe(50);
+    });
+
+    it('should return invalid result on verification failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ valid: false, error: 'Proof signature invalid' }),
+      });
+
+      const client = createClient();
+      const result = await client.verifyReputationProof({
+        proof_type: 1,
+        threshold: 40,
+        proof: 'bad_proof',
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Proof signature invalid');
+    });
+  });
+  describe('getConfig', () => {
+    it('should return current config with masked private key', () => {
+      const client = createClient({
+        privateKey: 'my-secret-key',
+        network: 'testnet',
+        facilitatorUrl: 'http://localhost:3000',
+        timeout: 45000,
+      });
+
+      const config = client.getConfig();
+
+      expect(config.privateKey).toBe('***');
+      expect(config.network).toBe('testnet');
+      expect(config.facilitatorUrl).toBe('http://localhost:3000');
+      expect(config.timeout).toBe(45000);
+    });
+
+    it('should return default values when no config is provided', () => {
+      const client = createClient();
+      const config = client.getConfig();
+
+      expect(config.privateKey).toBe('***');
+      expect(config.network).toBe('testnet');
+      expect(config.facilitatorUrl).toBe('http://localhost:3000');
+      expect(config.timeout).toBe(30000);
+    });
+  });
+
+  describe('setConfig', () => {
+    it('should update facilitatorUrl', () => {
+      const client = createClient();
+      client.setConfig({ facilitatorUrl: 'http://custom:4000' });
+      const config = client.getConfig();
+      expect(config.facilitatorUrl).toBe('http://custom:4000');
+    });
+
+    it('should update network', () => {
+      const client = createClient({ network: 'testnet' });
+      client.setConfig({ network: 'mainnet' });
+      const config = client.getConfig();
+      expect(config.network).toBe('mainnet');
+    });
+
+    it('should update timeout', () => {
+      const client = createClient();
+      client.setConfig({ timeout: 90000 });
+      const config = client.getConfig();
+      expect(config.timeout).toBe(90000);
+    });
+
+    it('should update privateKey (verified via getConfig masking)', () => {
+      const client = createClient();
+      client.setConfig({ privateKey: 'new-private-key' });
+      const config = client.getConfig();
+      expect(config.privateKey).toBe('***');
+    });
+
+    it('should allow partial updates without affecting other fields', () => {
+      const client = createClient({
+        network: 'testnet',
+        facilitatorUrl: 'http://original:3000',
+        timeout: 30000,
+      });
+
+      client.setConfig({ timeout: 60000 });
+
+      const config = client.getConfig();
+      expect(config.network).toBe('testnet');
+      expect(config.facilitatorUrl).toBe('http://original:3000');
+      expect(config.timeout).toBe(60000);
+    });
+  });
+});

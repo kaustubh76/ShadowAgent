@@ -193,3 +193,171 @@ describe('Crypto Utilities', () => {
     });
   });
 });
+
+// Additional crypto tests: generateNullifier, generateCommitment, generateSessionId
+
+describe('Additional Crypto Utilities', () => {
+  describe('generateNullifier', () => {
+    it('should produce consistent nullifiers for same inputs', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const n1 = await generateNullifier('callerHash1', 'jobHash1');
+      const n2 = await generateNullifier('callerHash1', 'jobHash1');
+      expect(n1).toBe(n2);
+    });
+
+    it('should produce different nullifiers for different inputs', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const n1 = await generateNullifier('callerA', 'job1');
+      const n2 = await generateNullifier('callerB', 'job1');
+      const n3 = await generateNullifier('callerA', 'job2');
+      expect(n1).not.toBe(n2);
+      expect(n1).not.toBe(n3);
+      expect(n2).not.toBe(n3);
+    });
+
+    it('should produce a 64-character hex string', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const n = await generateNullifier('caller', 'job');
+      expect(n).toHaveLength(64);
+      expect(/^[a-f0-9]+$/.test(n)).toBe(true);
+    });
+  });
+
+  describe('generateCommitment', () => {
+    it('should produce consistent commitments for same inputs', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c1 = await generateCommitment(100000, 'aleo1recipient', 'secret123');
+      const c2 = await generateCommitment(100000, 'aleo1recipient', 'secret123');
+      expect(c1).toBe(c2);
+    });
+
+    it('should produce different commitments for different amounts', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c1 = await generateCommitment(100000, 'aleo1r', 'secret');
+      const c2 = await generateCommitment(200000, 'aleo1r', 'secret');
+      expect(c1).not.toBe(c2);
+    });
+
+    it('should produce different commitments for different recipients', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c1 = await generateCommitment(100000, 'aleo1a', 'secret');
+      const c2 = await generateCommitment(100000, 'aleo1b', 'secret');
+      expect(c1).not.toBe(c2);
+    });
+
+    it('should produce different commitments for different secrets', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c1 = await generateCommitment(100000, 'aleo1r', 'secretA');
+      const c2 = await generateCommitment(100000, 'aleo1r', 'secretB');
+      expect(c1).not.toBe(c2);
+    });
+
+    it('should produce a 64-character hex string', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c = await generateCommitment(42, 'recipient', 'mysecret');
+      expect(c).toHaveLength(64);
+      expect(/^[a-f0-9]+$/.test(c)).toBe(true);
+    });
+  });
+
+  describe('generateNullifier - edge cases', () => {
+    it('should handle empty string inputs without throwing', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const n = await generateNullifier('', '');
+      expect(n).toHaveLength(64);
+      expect(/^[a-f0-9]+$/.test(n)).toBe(true);
+    });
+
+    it('should be sensitive to argument order', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const n1 = await generateNullifier('alpha', 'beta');
+      const n2 = await generateNullifier('beta', 'alpha');
+      expect(n1).not.toBe(n2);
+    });
+
+    it('should produce deterministic output with long inputs', async () => {
+      const { generateNullifier } = await import('./crypto');
+      const longCaller = 'aleo1' + 'a'.repeat(60);
+      const longJob = 'job_' + 'z'.repeat(100);
+      const n1 = await generateNullifier(longCaller, longJob);
+      const n2 = await generateNullifier(longCaller, longJob);
+      expect(n1).toBe(n2);
+      expect(n1).toHaveLength(64);
+    });
+  });
+
+  describe('generateCommitment - edge cases', () => {
+    it('should handle zero amount', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c = await generateCommitment(0, 'aleo1r', 'secret');
+      expect(c).toHaveLength(64);
+      expect(/^[a-f0-9]+$/.test(c)).toBe(true);
+    });
+
+    it('should produce different commitments for zero vs non-zero amount', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c1 = await generateCommitment(0, 'aleo1r', 'secret');
+      const c2 = await generateCommitment(1, 'aleo1r', 'secret');
+      expect(c1).not.toBe(c2);
+    });
+
+    it('should match the hash of amount:recipient:secret format', async () => {
+      const { generateCommitment, hashSecret } = await import('./crypto');
+      const commitment = await generateCommitment(500, 'addr', 'sec');
+      const manual = await hashSecret('500:addr:sec');
+      expect(commitment).toBe(manual);
+    });
+
+    it('should handle very large amounts', async () => {
+      const { generateCommitment } = await import('./crypto');
+      const c = await generateCommitment(Number.MAX_SAFE_INTEGER, 'aleo1r', 'secret');
+      expect(c).toHaveLength(64);
+      expect(/^[a-f0-9]+$/.test(c)).toBe(true);
+    });
+  });
+
+  describe('generateSessionId', () => {
+    it('should produce a 32-character hex string', () => {
+      const { generateSessionId } = require('./crypto');
+      const id = generateSessionId();
+      expect(id).toHaveLength(32);
+      expect(/^[a-f0-9]+$/.test(id)).toBe(true);
+    });
+
+    it('should produce unique IDs each call', () => {
+      const { generateSessionId } = require('./crypto');
+      const ids = new Set<string>();
+      for (let i = 0; i < 100; i++) {
+        ids.add(generateSessionId());
+      }
+      expect(ids.size).toBe(100);
+    });
+
+    it('should return a string type', () => {
+      const { generateSessionId } = require('./crypto');
+      const id = generateSessionId();
+      expect(typeof id).toBe('string');
+    });
+
+    it('should produce IDs of exactly 16 bytes (32 hex chars)', () => {
+      const { generateSessionId } = require('./crypto');
+      const id = generateSessionId();
+      expect(id.length).toBe(32);
+      for (let i = 0; i < id.length; i += 2) {
+        const byte = parseInt(id.substring(i, i + 2), 16);
+        expect(byte).toBeGreaterThanOrEqual(0);
+        expect(byte).toBeLessThanOrEqual(255);
+      }
+    });
+
+    it('should never produce the same ID in rapid succession', () => {
+      const { generateSessionId } = require('./crypto');
+      const id1 = generateSessionId();
+      const id2 = generateSessionId();
+      const id3 = generateSessionId();
+      expect(id1).not.toBe(id2);
+      expect(id2).not.toBe(id3);
+      expect(id1).not.toBe(id3);
+    });
+  });
+});
