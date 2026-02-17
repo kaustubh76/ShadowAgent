@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Search, Filter, RefreshCw, SearchX, X, Users } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Search, Filter, RefreshCw, SearchX, X, Users, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
 import {
   useAgentStore,
   ServiceType,
@@ -46,6 +46,28 @@ export default function ClientDashboard() {
   } = useAgentStore();
 
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [sortBy, setSortBy] = useState<'default' | 'tier' | 'service'>('default');
+  const PAGE_SIZE = 12;
+
+  const sortedResults = useMemo(() => {
+    const results = [...searchResults];
+    if (sortBy === 'tier') {
+      results.sort((a, b) => b.tier - a.tier);
+    } else if (sortBy === 'service') {
+      results.sort((a, b) => a.service_type - b.service_type);
+    }
+    return results;
+  }, [searchResults, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedResults.length / PAGE_SIZE));
+  const pagedResults = useMemo(
+    () => sortedResults.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [sortedResults, page]
+  );
+
+  // Reset page when results or sort changes
+  useEffect(() => { setPage(0); }, [searchResults, sortBy]);
 
   const handleClearFilters = () => {
     setFilters({
@@ -171,6 +193,7 @@ export default function ClientDashboard() {
                 })
               }
               className="input"
+              aria-label="Filter by service type"
             >
               <option value="">All Types</option>
               {Object.values(ServiceType)
@@ -195,6 +218,7 @@ export default function ClientDashboard() {
                 })
               }
               className="input"
+              aria-label="Filter by minimum tier"
             >
               <option value="">Any Tier</option>
               {Object.values(Tier)
@@ -219,6 +243,7 @@ export default function ClientDashboard() {
                 })
               }
               className="input"
+              aria-label="Filter by agent status"
             >
               <option value="">All</option>
               <option value="true">Active Only</option>
@@ -251,6 +276,19 @@ export default function ClientDashboard() {
             <h2 className="text-base font-semibold text-white">
               {searchResults.length} Agent{searchResults.length !== 1 ? 's' : ''} Found
             </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-3.5 h-3.5 text-gray-500" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'default' | 'tier' | 'service')}
+              className="bg-surface-2 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-shadow-500/40"
+              aria-label="Sort agents"
+            >
+              <option value="default">Default</option>
+              <option value="tier">By Tier</option>
+              <option value="service">By Service</option>
+            </select>
           </div>
         </div>
 
@@ -286,7 +324,7 @@ export default function ClientDashboard() {
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {searchResults.map((agent, index) => (
+            {pagedResults.map((agent, index) => (
               <div
                 key={agent.agent_id}
                 className="opacity-0 animate-fade-in-up"
@@ -295,6 +333,33 @@ export default function ClientDashboard() {
                 <AgentCard agent={agent} />
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {sortedResults.length > PAGE_SIZE && (
+          <div className="flex items-center justify-center gap-4 mt-8">
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Previous
+            </button>
+            <span className="text-sm text-gray-400">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Next page"
+            >
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>
