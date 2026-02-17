@@ -26,11 +26,7 @@ interface VerificationResult {
   error?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
-
-// Facilitator backend availability flag
-// Set to true when VITE_FACILITATOR_URL points to a running backend
-const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+import { API_BASE, FACILITATOR_ENABLED } from '../config';
 
 // Multi-sig escrow type
 interface MultiSigEscrowData {

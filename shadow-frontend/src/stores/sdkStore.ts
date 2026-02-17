@@ -23,7 +23,7 @@ interface SDKState {
   getClient: () => any;
 }
 
-const DEFAULT_FACILITATOR_URL = import.meta.env.VITE_FACILITATOR_URL || import.meta.env.VITE_API_URL || '/api';
+import { FACILITATOR_URL as DEFAULT_FACILITATOR_URL } from '../config';
 
 export const useSDKStore = create<SDKState>((set, get) => ({
   client: null,

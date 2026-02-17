@@ -27,9 +27,7 @@ import {
 import { getTierName, getServiceTypeName, useAgentStore } from '../stores/agentStore';
 import { listSessions } from '../lib/api';
 
-// Facilitator API URL — only used when VITE_FACILITATOR_URL is explicitly configured
-const FACILITATOR_URL = import.meta.env.VITE_FACILITATOR_URL || 'http://localhost:3001';
-const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+import { FACILITATOR_URL, FACILITATOR_ENABLED } from '../config';
 
 interface AgentReputation {
   totalJobs: number;
