@@ -1,14 +1,16 @@
-import { Component, ReactNode, useEffect } from 'react';
+import { Component, ReactNode, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
-import { Home, AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Home, AlertTriangle, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react';
 import Layout from './components/Layout';
-import HomePage from './pages/HomePage';
-import AgentDashboard from './pages/AgentDashboard';
-import ClientDashboard from './pages/ClientDashboard';
-import AgentDetails from './pages/AgentDetails';
-import DisputeCenter from './pages/DisputeCenter';
 import { ToastProvider } from './contexts/ToastContext';
 import { useSDKStore } from './stores/sdkStore';
+
+// Lazy-loaded page components for route-level code splitting
+const HomePage = lazy(() => import('./pages/HomePage'));
+const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
+const ClientDashboard = lazy(() => import('./pages/ClientDashboard'));
+const AgentDetails = lazy(() => import('./pages/AgentDetails'));
+const DisputeCenter = lazy(() => import('./pages/DisputeCenter'));
 
 // 404 Page
 function NotFound() {
@@ -124,16 +126,22 @@ function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<HomePage />} />
-            <Route path="agent" element={<AgentDashboard />} />
-            <Route path="client" element={<ClientDashboard />} />
-            <Route path="agents/:agentId" element={<AgentDetails />} />
-            <Route path="disputes" element={<DisputeCenter />} />
-            <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
+        <Suspense fallback={
+          <div className="min-h-screen bg-surface-0 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-shadow-400 animate-spin" />
+          </div>
+        }>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<HomePage />} />
+              <Route path="agent" element={<AgentDashboard />} />
+              <Route path="client" element={<ClientDashboard />} />
+              <Route path="agents/:agentId" element={<AgentDetails />} />
+              <Route path="disputes" element={<DisputeCenter />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </ToastProvider>
     </ErrorBoundary>
   );

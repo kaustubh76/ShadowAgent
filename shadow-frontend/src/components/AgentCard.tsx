@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { AgentListing, ServiceType, getServiceTypeName } from '../stores/agentStore';
 import TierBadge from './TierBadge';
@@ -28,7 +29,7 @@ const serviceColors = {
   [ServiceType.Custom]: 'service-custom',
 };
 
-export default function AgentCard({ agent }: AgentCardProps) {
+export default memo(function AgentCard({ agent }: AgentCardProps) {
   const Icon = serviceIcons[agent.service_type] || Settings;
   const colorClass = serviceColors[agent.service_type] || 'service-custom';
 
@@ -91,4 +92,4 @@ export default function AgentCard({ agent }: AgentCardProps) {
       </div>
     </Link>
   );
-}
+});
