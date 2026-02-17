@@ -59,3 +59,23 @@ export class Address {
     return new Address();
   }
 }
+
+export class AleoNetworkClient {
+  constructor(_rpcUrl?: string) {}
+
+  async getTransaction(_txId: string) {
+    return { status: 'accepted', block: { height: 100 }, transaction_id: 'mock-tx-id' };
+  }
+
+  async getLatestBlock() {
+    return { header: { metadata: { height: 100 } } };
+  }
+}
+
+export class AleoKeyProvider {
+  useCache(_enabled: boolean) {}
+}
+
+export class NetworkRecordProvider {
+  constructor(_account: unknown, _networkClient: unknown) {}
+}

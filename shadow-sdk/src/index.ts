@@ -14,6 +14,9 @@ export {
   Tier,
   ProofType,
   EscrowStatus,
+  SessionStatus,
+  // Type aliases
+  SessionStatusStr,
   // Interfaces
   AgentListing,
   AgentReputation,

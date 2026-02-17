@@ -127,13 +127,16 @@ export interface EscrowRecord {
 }
 
 /**
- * Session status
+ * Session status (numeric values match Leo contract constants)
  */
 export enum SessionStatus {
   Active = 0,
   Paused = 1,
   Closed = 2,
 }
+
+/** String-based session status used in the SDK and frontend */
+export type SessionStatusStr = 'active' | 'paused' | 'closed' | 'expired';
 
 /**
  * Payment session (for session-based payments)
@@ -151,7 +154,7 @@ export interface PaymentSession {
   request_count: number;
   window_start: number;
   valid_until: number;
-  status: SessionStatus | 'active' | 'paused' | 'closed' | 'expired';
+  status: SessionStatusStr;
 }
 
 /**

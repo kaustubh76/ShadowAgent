@@ -347,7 +347,7 @@ export class ShadowAgentServer {
     }
 
     // Create the proof (used internally for ZK generation)
-    createReputationProof(
+    const proofResult = await createReputationProof(
       proofType,
       threshold,
       {
@@ -361,9 +361,9 @@ export class ShadowAgentServer {
 
     return {
       owner: this.agentId,
-      proof_type: proofType,
-      threshold_met: true, // Would be determined by ZK circuit
-      tier_proven: this.reputation.tier,
+      proof_type: proofResult.proof_type,
+      threshold_met: proofResult.tier >= threshold,
+      tier_proven: proofResult.tier,
       generated_at: Date.now(),
     };
   }
