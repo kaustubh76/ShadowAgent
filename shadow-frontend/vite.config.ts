@@ -33,7 +33,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
     target: 'esnext', // Support top-level await for Aleo WASM
     commonjsOptions: {
       transformMixedEsModules: true, // Handle mixed ESM/CJS modules
