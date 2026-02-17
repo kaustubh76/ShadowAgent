@@ -6,6 +6,18 @@
 program shadow_agent_session.aleo {
 
     // ═══════════════════════════════════════════════════════════════════
+    // CONSTRUCTOR (required for deployment on Aleo testnet)
+    // ═══════════════════════════════════════════════════════════════════
+
+    async transition constructor() -> Future {
+        return finalize_constructor();
+    }
+
+    async function finalize_constructor() {
+        // No-op: program state is initialized via mappings on first use
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // RECORDS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -143,6 +155,9 @@ program shadow_agent_session.aleo {
 
         // Verify session is active
         assert_eq(session.status, STATUS_ACTIVE);
+
+        // Verify session hasn't expired
+        assert(current_block < session.valid_until);
 
         // Verify amount within per-request limit
         assert(amount > 0u64);
