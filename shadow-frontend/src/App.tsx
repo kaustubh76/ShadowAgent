@@ -105,22 +105,17 @@ function App() {
 
   const { checkHealth } = useSDKStore();
 
-  // Initialize SDK client and check facilitator health on app load
+  // Initialize SDK client and run first health check once ready
   useEffect(() => {
-    initializeClient();
-  }, [initializeClient]);
+    initializeClient().then(() => checkHealth());
+  }, [initializeClient, checkHealth]);
 
   // Periodically check facilitator health (every 30s)
   useEffect(() => {
     const interval = setInterval(() => {
       checkHealth();
     }, 30_000);
-    // Initial check after SDK init settles
-    const timeout = setTimeout(() => checkHealth(), 2_000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
+    return () => clearInterval(interval);
   }, [checkHealth]);
 
   return (

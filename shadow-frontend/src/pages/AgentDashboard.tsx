@@ -19,7 +19,7 @@ import {
 import { getTierName, useAgentStore } from '../stores/agentStore';
 import { listSessions } from '../lib/api';
 
-import { FACILITATOR_URL, FACILITATOR_ENABLED } from '../config';
+import { API_BASE, FACILITATOR_ENABLED } from '../config';
 
 interface AgentReputation {
   totalJobs: number;
@@ -34,6 +34,9 @@ export default function AgentDashboard() {
   const toast = useToast();
   const { generateProof } = useReputationProof();
   const { checkBalance } = useBalanceCheck();
+
+  // Agent store
+  const { setSessions } = useAgentStore();
 
   // State
   const [isRegistered, setIsRegistered] = useState(false);
@@ -63,7 +66,7 @@ export default function AgentDashboard() {
       if (registered) {
         if (FACILITATOR_ENABLED) {
           try {
-            const response = await fetch(`${FACILITATOR_URL}/agents/by-address/${publicKey}`);
+            const response = await fetch(`${API_BASE}/agents/by-address/${publicKey}`);
             if (response.ok) {
               const data = await response.json();
               setAgentId(data.agent_id);
@@ -98,6 +101,13 @@ export default function AgentDashboard() {
   useEffect(() => {
     checkRegistration();
   }, [checkRegistration]);
+
+  // Load sessions where user is the agent
+  useEffect(() => {
+    if (connected && publicKey && isRegistered) {
+      listSessions({ agent: publicKey }).then(setSessions);
+    }
+  }, [connected, publicKey, isRegistered, setSessions]);
 
   // Handle unregistration
   const handleUnregister = async () => {
@@ -138,7 +148,7 @@ export default function AgentDashboard() {
       setReputation(null);
 
       if (FACILITATOR_ENABLED) {
-        fetch(`${FACILITATOR_URL}/agents/unregister`, {
+        fetch(`${API_BASE}/agents/unregister`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: publicKey, tx_id: txId }),
@@ -256,15 +266,6 @@ export default function AgentDashboard() {
     reputation && reputation.totalJobs > 0
       ? reputation.totalRatingPoints / reputation.totalJobs / 10
       : 0;
-
-  // Load sessions where user is the agent
-  const { setSessions } = useAgentStore();
-
-  useEffect(() => {
-    if (connected && publicKey && isRegistered) {
-      listSessions({ agent: publicKey }).then(setSessions);
-    }
-  }, [connected, publicKey, isRegistered, setSessions]);
 
   return (
     <div className="space-y-8">

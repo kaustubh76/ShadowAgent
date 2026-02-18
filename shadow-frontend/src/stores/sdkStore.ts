@@ -2,6 +2,7 @@
 // Uses lazy import to avoid blocking React mount with WASM loading
 
 import { create } from 'zustand';
+import { FACILITATOR_URL as DEFAULT_FACILITATOR_URL } from '../config';
 
 interface HealthStatus {
   status: string;
@@ -16,14 +17,12 @@ interface SDKState {
   lastHealthCheck: number | null;
 
   // Actions
-  initializeClient: (config?: Record<string, unknown>) => void;
+  initializeClient: (config?: Record<string, unknown>) => Promise<void>;
   updateConfig: (updates: Record<string, unknown>) => void;
   checkHealth: () => Promise<HealthStatus | null>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getClient: () => any;
 }
-
-import { FACILITATOR_URL as DEFAULT_FACILITATOR_URL } from '../config';
 
 export const useSDKStore = create<SDKState>((set, get) => ({
   client: null,

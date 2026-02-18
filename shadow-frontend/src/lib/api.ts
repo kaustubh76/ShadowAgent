@@ -90,6 +90,8 @@ export async function fetchWithRetry(
       }
 
       if (response.ok || response.status < 500) return response;
+      // Don't retry GET 500s — likely proxy target is down
+      if (!options?.method || options.method === 'GET') return response;
       if (i < retries) await new Promise(r => setTimeout(r, delay * (i + 1)));
     } catch (err) {
       if (i === retries) throw err;
@@ -101,6 +103,14 @@ export async function fetchWithRetry(
 
 const _cache = new Map<string, { data: unknown; ts: number }>();
 const CACHE_TTL = 30_000; // 30 seconds
+
+// Periodically evict expired entries to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of _cache.entries()) {
+    if (now - entry.ts >= CACHE_TTL) _cache.delete(key);
+  }
+}, 60_000);
 
 function getCached<T>(key: string): T | null {
   const entry = _cache.get(key);

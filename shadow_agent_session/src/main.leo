@@ -54,6 +54,17 @@ program shadow_agent_session.aleo {
         created_at: u64
     }
 
+    // Hash input structs (BHP256 requires structs, not tuples)
+    struct SessionIdInput {
+        caller: address,
+        agent: address
+    }
+
+    struct PolicyIdInput {
+        caller: address,
+        height: u64
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // MAPPINGS
     // ═══════════════════════════════════════════════════════════════════
@@ -99,8 +110,8 @@ program shadow_agent_session.aleo {
         assert(rate_limit > 0u64);
         assert(duration_blocks > 0u64);
 
-        // Generate unique session ID from caller + agent
-        let session_id: field = BHP256::hash_to_field(self.caller);
+        // Generate unique session ID from caller + agent pair
+        let session_id: field = BHP256::hash_to_field(SessionIdInput { caller: self.caller, agent: agent });
 
         // Calculate expiry from claimed block height
         let valid_until: u64 = current_block + duration_blocks;
@@ -351,7 +362,7 @@ program shadow_agent_session.aleo {
         assert(max_single_request > 0u64);
         assert(max_single_request <= max_session_value);
 
-        let policy_id: field = BHP256::hash_to_field(self.caller);
+        let policy_id: field = BHP256::hash_to_field(PolicyIdInput { caller: self.caller, height: current_block });
 
         return SpendingPolicy {
             owner: self.caller,
@@ -388,7 +399,7 @@ program shadow_agent_session.aleo {
         assert(rate_limit > 0u64);
         assert(duration_blocks > 0u64);
 
-        let session_id: field = BHP256::hash_to_field(self.caller);
+        let session_id: field = BHP256::hash_to_field(SessionIdInput { caller: self.caller, agent: agent });
         let valid_until: u64 = current_block + duration_blocks;
 
         let session: PaymentSession = PaymentSession {
