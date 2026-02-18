@@ -190,6 +190,25 @@ export class ShadowAgentClient {
           continue;
         }
 
+        // Handle 429 Too Many Requests — retry with Retry-After backoff
+        if (response.status === 429) {
+          const retryAfterHeader = response.headers.get('Retry-After');
+          const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 0;
+          const delayMs = Math.min((retryAfterSec || (attempt + 1)) * 1000, 30_000);
+
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+
+          const errorBody = await response.json().catch(() => ({})) as { error?: string };
+          return {
+            success: false,
+            error: errorBody.error || 'Rate limit exceeded',
+            retryAfter: retryAfterSec || undefined,
+          };
+        }
+
         // Other error
         const errorData = await response.json().catch(() => ({})) as { error?: string };
         return {

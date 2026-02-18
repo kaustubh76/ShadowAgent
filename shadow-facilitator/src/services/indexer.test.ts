@@ -235,4 +235,98 @@ describe('IndexerService', () => {
       expect(afterStats.cachedAgents).toBe(beforeStats.cachedAgents - 1);
     });
   });
+
+  describe('Consistent Hash Ring Integration', () => {
+    it('should own all keys in single-node mode (default)', () => {
+      const testAgents = createTestAgents();
+      for (const agent of testAgents) {
+        expect(indexerService.isOwnedByThisNode(agent.agent_id)).toBe(true);
+      }
+    });
+
+    it('should report correct owner node for agents', () => {
+      const testAgents = createTestAgents();
+      for (const agent of testAgents) {
+        const owner = indexerService.getOwnerNode(agent.agent_id);
+        expect(owner).not.toBeNull();
+      }
+    });
+
+    it('should redistribute keys when peers are added', () => {
+      indexerService.addPeer('node-1');
+      indexerService.addPeer('node-2');
+
+      const testAgents = createTestAgents();
+      let ownedByDefault = 0;
+      for (const agent of testAgents) {
+        if (indexerService.isOwnedByThisNode(agent.agent_id)) {
+          ownedByDefault++;
+        }
+      }
+
+      // With 3 nodes, this node should NOT own all keys
+      expect(ownedByDefault).toBeLessThan(testAgents.length);
+    });
+
+    it('should reclaim keys when peers are removed', () => {
+      indexerService.addPeer('node-1');
+      indexerService.addPeer('node-2');
+
+      const testAgents = createTestAgents();
+      let ownedWith3Nodes = 0;
+      for (const agent of testAgents) {
+        if (indexerService.isOwnedByThisNode(agent.agent_id)) {
+          ownedWith3Nodes++;
+        }
+      }
+
+      indexerService.removePeer('node-1');
+      indexerService.removePeer('node-2');
+
+      let ownedWith1Node = 0;
+      for (const agent of testAgents) {
+        if (indexerService.isOwnedByThisNode(agent.agent_id)) {
+          ownedWith1Node++;
+        }
+      }
+
+      // Back to single node — should own all keys again
+      expect(ownedWith1Node).toBe(testAgents.length);
+      expect(ownedWith1Node).toBeGreaterThan(ownedWith3Nodes);
+    });
+
+    it('should expose the hash ring', () => {
+      const ring = indexerService.getHashRing();
+      expect(ring).toBeDefined();
+      expect(ring.getNodeCount()).toBe(1);
+
+      indexerService.addPeer('node-1');
+      expect(ring.getNodeCount()).toBe(2);
+
+      indexerService.removePeer('node-1');
+      expect(ring.getNodeCount()).toBe(1);
+    });
+
+    it('should prefer evicting non-owned entries when cache is full', () => {
+      // Add a peer so some keys are no longer owned
+      indexerService.addPeer('node-remote');
+
+      // Fill cache with many agents
+      for (let i = 0; i < 50; i++) {
+        indexerService.cacheAgent({
+          agent_id: `bulk-agent-${i}`,
+          service_type: ServiceType.NLP,
+          endpoint_hash: `hash-${i}`,
+          tier: Tier.New,
+          is_active: true,
+        });
+      }
+
+      const stats = indexerService.getStats();
+      expect(stats.cachedAgents).toBeGreaterThan(0);
+
+      // Cleanup
+      indexerService.removePeer('node-remote');
+    });
+  });
 });

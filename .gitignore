@@ -30,3 +30,4 @@ coverage/
 
 # Leo build artifacts
 shadow_agent/build/outputs/
+.vercel

@@ -1,8 +1,18 @@
 // Partial Refund Routes (Phase 10a)
 
 import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 const router = Router();
+
+// Per-address rate limiting: 5 refund proposals per hour
+const refundLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.refund,
+  keyExtractor: (req: Request) => req.body?.agent || req.body?.client || req.ip || 'unknown',
+  message: 'Too many refund requests, please try again later',
+});
 
 // In-memory store (production: Redis/PostgreSQL)
 interface RefundProposal {
@@ -17,10 +27,14 @@ interface RefundProposal {
   updated_at: string;
 }
 
-const refundStore = new Map<string, RefundProposal>();
+// Refund proposals expire after 30 days
+const refundStore = new TTLStore<RefundProposal>({
+  maxSize: 50_000,
+  defaultTTLMs: 30 * 86_400_000,
+});
 
 // POST /refunds - Propose a partial refund
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', refundLimiter, async (req: Request, res: Response) => {
   try {
     const { agent, total_amount, agent_amount, job_hash } = req.body;
 
@@ -79,7 +93,7 @@ router.get('/:jobHash', async (req: Request, res: Response) => {
 router.get('/', async (req: Request, res: Response) => {
   const { agent_id, status } = req.query;
 
-  let proposals = Array.from(refundStore.values());
+  let proposals = refundStore.values();
 
   if (agent_id) {
     proposals = proposals.filter(p => p.agent === agent_id);

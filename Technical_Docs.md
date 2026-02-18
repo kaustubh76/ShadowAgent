@@ -54,7 +54,7 @@ ShadowAgent separates public discovery from private transactions:
 
 1. **Rolling Reputation Model**: O(1) complexity for reputation proofs
 2. **Burn-to-Rate Sybil Resistance**: Economic cost for rating submission
-3. **zPass Identity Gating**: One credential per agent registration
+3. **Bond-Based Identity Gating**: 10-credit stake per agent registration
 4. **Private Escrow with HTLC**: Trustless fair exchange
 5. **Semi-Private Discovery**: Public listings with private backing data
 
@@ -98,14 +98,14 @@ ShadowAgent separates public discovery from private transactions:
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │                        ALEO NETWORK LAYER                             │   │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │   │
-│  │  │ shadow_agent    │  │ Private Token   │  │ zPass           │       │   │
-│  │  │ .aleo           │  │ Contract        │  │ Verification    │       │   │
-│  │  │                 │  │ (pALEO/USDCx)   │  │                 │       │   │
-│  │  │ • Registration  │  │                 │  │ • Identity      │       │   │
-│  │  │ • Reputation    │  │ • Private       │  │   Proofs        │       │   │
-│  │  │ • Escrow        │  │   Transfers     │  │ • Credential    │       │   │
-│  │  │ • Proofs        │  │ • Balance       │  │   Verification  │       │   │
-│  │  │                 │  │   Hiding        │  │                 │       │   │
+│  │  │ shadow_agent    │  │ shadow_agent    │  │ shadow_agent    │       │   │
+│  │  │ .aleo           │  │ _ext.aleo       │  │ _session.aleo   │       │   │
+│  │  │                 │  │                 │  │                 │       │   │
+│  │  │ • Registration  │  │ • Disputes      │  │ • Sessions      │       │   │
+│  │  │ • Reputation    │  │ • Refunds       │  │ • Policies      │       │   │
+│  │  │ • Escrow        │  │ • Decay Proofs  │  │ • Receipts      │       │   │
+│  │  │ • ZK Proofs     │  │ • Multi-Sig     │  │ • Rate Limits   │       │   │
+│  │  │                 │  │                 │  │                 │       │   │
 │  │  └─────────────────┘  └─────────────────┘  └─────────────────┘       │   │
 │  │                                                                       │   │
 │  │  ┌─────────────────────────────────────────────────────────────────┐ │   │
@@ -113,8 +113,9 @@ ShadowAgent separates public discovery from private transactions:
 │  │  │  Mappings (Public):           Records (Private):                 │ │   │
 │  │  │  • agent_listings             • AgentReputation                  │ │   │
 │  │  │  • used_nullifiers            • RatingRecord                     │ │   │
-│  │  │  • verified_identities        • EscrowRecord                     │ │   │
-│  │  │                               • ReputationProof                  │ │   │
+│  │  │  • registered_agents          • EscrowRecord                     │ │   │
+│  │  │  • active_disputes            • ReputationProof                  │ │   │
+│  │  │  • active_sessions            • PaymentSession + more            │ │   │
 │  │  └─────────────────────────────────────────────────────────────────┘ │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -126,30 +127,28 @@ ShadowAgent separates public discovery from private transactions:
 ### 2.2.1 Agent Registration Flow
 
 ```
-┌────────┐     ┌────────────┐     ┌─────────────┐     ┌──────────────┐
-│  Agent │     │ Facilitator│     │ Aleo Network│     │ zPass Service│
-└───┬────┘     └─────┬──────┘     └──────┬──────┘     └──────┬───────┘
-    │                │                   │                   │
-    │ 1. Register    │                   │                   │
-    │ ───────────────>                   │                   │
-    │                │                   │                   │
-    │                │ 2. Verify zPass   │                   │
-    │                │ ──────────────────────────────────────>
-    │                │                   │                   │
-    │                │                   │   3. Credential   │
-    │                │                   │      Proof        │
-    │                │ <──────────────────────────────────────
-    │                │                   │                   │
-    │                │ 4. register_agent │                   │
-    │                │ ─────────────────>│                   │
-    │                │                   │                   │
-    │                │                   │ 5. Create Records │
-    │                │                   │    + Listing      │
-    │                │                   │ ─────────────────>│
-    │                │                   │                   │
-    │ 6. AgentReputation Record          │                   │
-    │ <───────────────────────────────────                   │
-    │                │                   │                   │
+┌────────┐     ┌────────────┐     ┌─────────────┐
+│  Agent │     │ Facilitator│     │ Aleo Network│
+└───┬────┘     └─────┬──────┘     └──────┬──────┘
+    │                │                   │
+    │ 1. Register    │                   │
+    │  (bond: 10 cr) │                   │
+    │ ───────────────>                   │
+    │                │                   │
+    │                │ 2. register_agent │
+    │                │  (stake bond)     │
+    │                │ ─────────────────>│
+    │                │                   │
+    │                │                   │ 3. Verify not
+    │                │                   │    already registered
+    │                │                   │    (registered_agents)
+    │                │                   │
+    │                │                   │ 4. Create Records
+    │                │                   │    + Listing
+    │                │                   │
+    │ 5. AgentReputation + AgentBond     │
+    │ <───────────────────────────────────
+    │                │                   │
 ```
 
 ### 2.2.2 Service Purchase Flow
@@ -514,13 +513,13 @@ mapping used_nullifiers: field => bool
 - Value: boolean (true if used)
 - Purpose: Prevent double-rating attacks
 
-### verified_identities
+### registered_agents
 ```
-mapping verified_identities: field => bool
+mapping registered_agents: address => bool
 ```
-- Key: zPass credential hash (field)
+- Key: Agent's Aleo address
 - Value: boolean (true if registered)
-- Purpose: One agent per identity (Sybil resistance)
+- Purpose: One agent per address (Sybil resistance via bond staking)
 
 ---
 
@@ -530,7 +529,7 @@ mapping verified_identities: field => bool
 
 | Program | Purpose | Dependencies |
 |---------|---------|--------------|
-| shadow_agent.aleo | Core marketplace logic | credits.aleo, zpass.aleo |
+| shadow_agent.aleo | Core marketplace logic | credits.aleo |
 
 ## 4.2 Constants
 
@@ -551,28 +550,29 @@ mapping verified_identities: field => bool
 
 ### 4.3.1 register_agent
 
-**Purpose**: Register a new agent with zPass identity verification.
+**Purpose**: Register a new agent with bond staking for Sybil resistance.
 
 **Inputs**:
 | Parameter | Type | Visibility | Description |
 |-----------|------|------------|-------------|
 | service_type | u8 | Private | Agent's service category |
 | endpoint_hash | field | Private | Hash of service endpoint URL |
-| zpass_credential | field | Private | zPass identity proof |
+| bond_amount | u64 | Private | Bond stake (min 10 credits / 10,000,000 microcredits) |
 
 **Outputs**:
 | Output | Type | Description |
 |--------|------|-------------|
 | AgentReputation | Record | Initial reputation record |
+| AgentBond | Record | Bond stake record (returned on unregister) |
 
 **Finalize Effects**:
-- Verifies zpass_credential not previously used
-- Marks credential as used in verified_identities mapping
-- Creates PublicListing in agent_listings mapping
+- Verifies caller address not previously registered via `registered_agents` mapping
+- Marks address as registered
+- Creates PublicListing in `agent_listings` mapping
 
 **Failure Conditions**:
-- zPass credential already registered
-- Invalid credential proof
+- Address already registered
+- Bond amount below minimum (10 credits)
 
 ### 4.3.2 submit_rating
 
@@ -953,10 +953,10 @@ Verify reputation proof.
 
 | Attacker Type | Capabilities | Mitigations |
 |---------------|--------------|-------------|
-| Malicious Agent | Create fake ratings, inflate reputation | Burn-to-rate, zPass identity |
+| Malicious Agent | Create fake ratings, inflate reputation | Burn-to-rate, bond staking |
 | Malicious Client | Double-spend, refuse payment | Escrow HTLC |
 | Network Observer | Transaction correlation | Private records, timing obfuscation |
-| Sybil Attacker | Create multiple identities | zPass one-per-human |
+| Sybil Attacker | Create multiple identities | Bond staking (10 credits/agent) |
 | Front-runner | Observe and exploit transactions | Private records hide amounts |
 
 ### 6.1.2 Security Properties
@@ -965,7 +965,7 @@ Verify reputation proof.
 |----------|----------------|--------------|
 | Payment Privacy | Aleo private records | Transaction analysis |
 | Reputation Integrity | Rolling hash chain | ZK verification |
-| Sybil Resistance | zPass + burn mechanism | Economic analysis |
+| Sybil Resistance | Bond staking + burn mechanism | Economic analysis |
 | Fair Exchange | HTLC escrow | Game-theoretic proof |
 | Non-repudiation | Nullifier tracking | Double-spend impossible |
 
@@ -977,12 +977,12 @@ To fake Gold Tier (200 jobs, $10k revenue):
 
 | Component | Cost per Unit | Quantity | Total Cost |
 |-----------|---------------|----------|------------|
+| Registration bond | 10 credits | 1 | 10 credits per agent |
 | Rating burn | 0.5 credits | 200 | 100 credits |
 | Gas fees | ~0.001 credits | 200 | 0.2 credits |
 | Minimum payments | $0.10 | 200 | $20 (self-paid) |
-| zPass credential | N/A | 1 | Blocks infinite agents |
 
-**Result**: Sybil attack is either impossible (with zPass) or economically irrational (100+ credits burned for fake reputation).
+**Result**: Sybil attack is economically irrational — 110+ credits burned per fake agent for manufactured reputation.
 
 ### 6.2.2 Defense Layers
 
@@ -991,10 +991,10 @@ To fake Gold Tier (200 jobs, $10k revenue):
 │                      SYBIL DEFENSE LAYERS                            │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  Layer 1: Identity Gating (zPass)                                   │
-│  ├── One verified credential = One agent registration               │
-│  ├── Cannot create infinite agents from one identity                │
-│  └── Blocks the attack vector entirely                              │
+│  Layer 1: Bond Staking (10 credits per agent)                       │
+│  ├── Economic barrier: 10 credits locked per registration           │
+│  ├── Creating N fake agents costs N × 10 credits                   │
+│  └── Bond reclaimable on unregister (honest agents get funds back)  │
 │                                                                      │
 │  Layer 2: Economic Burn (Burn-to-Rate)                              │
 │  ├── Every rating costs 0.5 credits                                 │
@@ -1127,35 +1127,29 @@ All proofs are verified on-chain with constant-time verification (~O(1)).
 
 # 8. Integration Specifications
 
-## 8.1 zPass Integration
+## 8.1 Agent Registration (Bond Staking)
 
-### 8.1.1 Credential Types Supported
+### 8.1.1 Sybil Resistance Mechanism
 
-| Credential | Provider | Use Case |
-|------------|----------|----------|
-| Passport | Government | Identity verification |
-| KYC | Coinbase, etc. | Financial identity |
-| Email | Google, etc. | Basic verification |
-| Phone | Twilio, etc. | SMS verification |
+The deployed contract uses bond staking (10 credits per agent) as the identity layer for Sybil resistance. Each Aleo address can register at most one agent.
 
-### 8.1.2 Integration Flow
+### 8.1.2 Registration Flow
 
 ```
-1. Agent obtains zPass credential from provider
-2. Agent generates ZK proof of credential ownership
-3. Agent calls register_agent with credential proof
-4. Contract verifies credential not previously used
-5. Contract marks credential hash as used
-6. Agent receives AgentReputation record
+1. Agent calls register_agent with service_type, endpoint_hash, and bond_amount (≥ 10 credits)
+2. Contract generates unique agent_id from caller address via BHP256 hash
+3. Finalize verifies address not already in registered_agents mapping
+4. Marks address as registered, creates PublicListing in agent_listings
+5. Agent receives AgentReputation record + AgentBond record
 ```
 
-### 8.1.3 Credential Verification
+### 8.1.3 Registration Verification
 
 | Check | Purpose | Implementation |
 |-------|---------|----------------|
-| Validity | Credential not expired | Check expiry in proof |
-| Uniqueness | One agent per credential | Mapping lookup |
-| Authenticity | Issued by valid provider | Signature verification |
+| Bond minimum | Ensure economic stake | `assert(bond_amount >= 10_000_000)` |
+| Uniqueness | One agent per address | `registered_agents` mapping lookup |
+| Unregister | Reclaim bond | `unregister_agent` returns bond, sets `is_active: false` |
 
 ## 8.2 x402 Protocol Integration
 
@@ -1474,7 +1468,7 @@ Step 5: Enable HTTPS
 
 | ID | Scenario | Expected Result |
 |----|----------|-----------------|
-| HP-01 | Agent registers with valid zPass | AgentReputation created |
+| HP-01 | Agent registers with bond stake | AgentReputation + AgentBond created |
 | HP-02 | Client purchases service | Service delivered, payment settled |
 | HP-03 | Client submits rating | Reputation updated |
 | HP-04 | Agent generates tier proof | Valid proof returned |
@@ -1534,7 +1528,7 @@ Step 5: Enable HTTPS
 | Rolling Reputation | Cumulative stats updated per job |
 | Tier | Reputation level (New/Bronze/Silver/Gold/Diamond) |
 | x402 | HTTP payment protocol using 402 status code |
-| zPass | Aleo's credential verification system |
+| Bond Staking | 10-credit economic barrier per agent registration |
 | ZK Proof | Zero-knowledge cryptographic proof |
 
 ---
@@ -1547,7 +1541,7 @@ Step 5: Enable HTTPS
 | E002 | Payment below minimum | Increase payment amount |
 | E003 | Burn amount insufficient | Use ≥ 500,000 microcredits |
 | E004 | Nullifier already used | Cannot double-rate |
-| E005 | zPass credential used | One agent per credential |
+| E005 | Address already registered | One agent per address (unregister first) |
 | E006 | Escrow deadline passed | Cannot claim, only refund |
 | E007 | Invalid secret | Secret doesn't match hash |
 | E008 | Unauthorized caller | Wrong address for operation |
@@ -1561,7 +1555,7 @@ Step 5: Enable HTTPS
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | Initial | Basic reputation system |
-| 2.0 | Current | Rolling reputation, Sybil resistance, escrow, zPass |
+| 2.0 | Current | Rolling reputation, Sybil resistance, escrow, bond staking |
 
 ---
 

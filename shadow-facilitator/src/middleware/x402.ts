@@ -7,32 +7,26 @@ import crypto from 'crypto';
 import { aleoService } from '../services/aleo';
 import { getRedisService, PendingJob } from '../services/redis';
 import { EscrowProof, PaymentTerms } from '../types';
+import { TokenBucketLimiter } from './rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 // Configuration
 const DEFAULT_PRICE = parseInt(process.env.DEFAULT_PRICE || '100000', 10); // 0.1 credits
 const DEFAULT_DEADLINE_BLOCKS = parseInt(process.env.DEFAULT_DEADLINE_BLOCKS || '100', 10);
 const ALEO_NETWORK = process.env.ALEO_NETWORK || 'aleo:testnet';
 
-// In-memory fallback when Redis is not available
-const memoryJobs: Map<string, {
+// In-memory fallback when Redis is not available (1 hour TTL, 10K max entries)
+interface MemoryJob {
   secret: string;
   secretHash: string;
   price: number;
   agentId: string;
-  createdAt: number;
-}> = new Map();
-
-// Clean up old pending jobs periodically
-setInterval(() => {
-  const now = Date.now();
-  const maxAge = 3600000; // 1 hour
-
-  for (const [jobHash, job] of memoryJobs.entries()) {
-    if (now - job.createdAt > maxAge) {
-      memoryJobs.delete(jobHash);
-    }
-  }
-}, 60000); // Every minute
+}
+const memoryJobs = new TTLStore<MemoryJob>({
+  maxSize: 10_000,
+  defaultTTLMs: 3_600_000,
+});
 
 export interface X402Options {
   pricePerRequest?: number;
@@ -144,16 +138,22 @@ async function storePendingJob(
 
     const stored = await redis.setPendingJob(job);
     if (stored) {
-      // Also store secret separately (not in the job object for security)
-      // In production, secrets should be encrypted at rest
-      return;
+      // Store secret in a separate Redis key (isolated from job metadata)
+      const secretStored = await redis.setJobSecret(jobHash, data.secret);
+      if (secretStored) {
+        return;
+      }
+      // Secret storage failed — clean up the job and fall through to memory
+      await redis.deletePendingJob(jobHash);
     }
   }
 
   // Fallback to memory
   memoryJobs.set(jobHash, {
-    ...data,
-    createdAt,
+    secret: data.secret,
+    secretHash: data.secretHash,
+    price: data.price,
+    agentId: data.agentId,
   });
 }
 
@@ -163,7 +163,7 @@ async function storePendingJob(
 async function getPendingJobData(
   jobHash: string
 ): Promise<{ secret: string; secretHash: string; price: number } | null> {
-  // Check memory first (secrets are stored here)
+  // Check memory first
   const memJob = memoryJobs.get(jobHash);
   if (memJob) {
     return {
@@ -173,15 +173,14 @@ async function getPendingJobData(
     };
   }
 
-  // Check Redis
+  // Check Redis — retrieve both job metadata and secret
   const redis = getRedisService();
   if (redis.isConnected()) {
     const job = await redis.getPendingJob(jobHash);
     if (job) {
-      // Note: Secret is not stored in Redis for security
-      // This would need to be retrieved from a secure secret store
+      const secret = await redis.getJobSecret(jobHash);
       return {
-        secret: '', // Would come from secure storage
+        secret: secret || '',
         secretHash: job.secretHash,
         price: job.amount,
       };
@@ -199,7 +198,10 @@ async function deletePendingJobData(jobHash: string): Promise<void> {
 
   const redis = getRedisService();
   if (redis.isConnected()) {
-    await redis.deletePendingJob(jobHash);
+    await Promise.all([
+      redis.deletePendingJob(jobHash),
+      redis.deleteJobSecret(jobHash),
+    ]);
   }
 }
 
@@ -217,6 +219,16 @@ export function x402Middleware(options: X402Options = {}) {
     deadlineBlocks = DEFAULT_DEADLINE_BLOCKS,
     escrowRequired = true,
   } = options;
+
+  // Token bucket rate limiter for payment generation (per IP)
+  const paymentGenLimiter = new TokenBucketLimiter({
+    maxRequests: config.rateLimit.x402.maxRequests,
+    windowMs: config.rateLimit.x402.windowMs,
+  });
+
+  // Cleanup stale limiter entries every 60 seconds
+  const limiterCleanup = setInterval(() => paymentGenLimiter.cleanup(), 60_000);
+  if (limiterCleanup.unref) limiterCleanup.unref();
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Skip payment for OPTIONS requests (CORS preflight)
@@ -296,6 +308,17 @@ export function x402Middleware(options: X402Options = {}) {
       return;
     }
 
+    // Rate limit payment term generation (prevents abuse of 402 responses)
+    const clientKey = req.ip || req.socket?.remoteAddress || 'unknown';
+    const limitResult = paymentGenLimiter.check(`x402:${clientKey}`);
+    if (!limitResult.allowed) {
+      res.status(429).json({
+        error: 'Too many payment requests',
+        retryAfter: limitResult.retryAfter,
+      });
+      return;
+    }
+
     // Generate new job details
     const newJobHash = generateJobHash(req);
     const secret = generateSecret();
@@ -339,15 +362,14 @@ export async function completeJob(jobHash: string): Promise<boolean> {
 }
 
 /**
- * Get all pending jobs (for debugging)
+ * Get all pending jobs (for debugging — memory-only)
  */
-export function getAllPendingJobs(): Map<string, { secretHash: string; price: number; createdAt: number }> {
-  const result = new Map();
+export function getAllPendingJobs(): Map<string, { secretHash: string; price: number }> {
+  const result = new Map<string, { secretHash: string; price: number }>();
   for (const [hash, job] of memoryJobs.entries()) {
     result.set(hash, {
       secretHash: job.secretHash,
       price: job.price,
-      createdAt: job.createdAt,
     });
   }
   return result;

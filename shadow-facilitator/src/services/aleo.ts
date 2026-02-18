@@ -2,9 +2,10 @@
 // Real implementation for Aleo network interaction
 
 import { AgentListing, EscrowProof, ReputationProof, VerificationResult, Tier } from '../types';
+import { withRetry, CircuitBreaker } from '../utils/resilience';
 
 // Optional logger - avoid circular dependency with index.ts during tests
-let logger: { warn: (msg: string, ...args: unknown[]) => void; error: (msg: string, ...args: unknown[]) => void; debug: (msg: string, ...args: unknown[]) => void } | null = null;
+let logger: { warn: (msg: string, ...args: unknown[]) => void; error: (msg: string, ...args: unknown[]) => void; debug: (msg: string, ...args: unknown[]) => void; info: (msg: string, ...args: unknown[]) => void } | null = null;
 try {
   // Only import if not in test environment
   if (process.env.NODE_ENV !== 'test') {
@@ -21,52 +22,82 @@ const ALEO_RPC_URL = process.env.ALEO_RPC_URL || 'https://api.explorer.aleo.org/
 const ALEO_NETWORK = process.env.ALEO_NETWORK || 'testnet';
 const PROGRAM_ID = process.env.PROGRAM_ID || 'shadow_agent.aleo';
 
-// Retry configuration
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1000;
+// Retry configuration — exponential backoff with jitter
+const MAX_RETRIES = parseInt(process.env.ALEO_MAX_RETRIES || '3', 10);
+const BASE_DELAY_MS = parseInt(process.env.ALEO_RETRY_BASE_DELAY_MS || '1000', 10);
+const MAX_DELAY_MS = parseInt(process.env.ALEO_RETRY_MAX_DELAY_MS || '30000', 10);
+
+// Circuit breaker configuration
+const CB_FAILURE_THRESHOLD = parseInt(process.env.ALEO_CB_FAILURE_THRESHOLD || '5', 10);
+const CB_RESET_TIMEOUT_MS = parseInt(process.env.ALEO_CB_RESET_TIMEOUT_MS || '60000', 10);
 
 export class AleoService {
   private rpcUrl: string;
   private programId: string;
   private network: string;
+  private circuitBreaker: CircuitBreaker;
 
   constructor(rpcUrl?: string, programId?: string) {
     this.rpcUrl = rpcUrl || ALEO_RPC_URL;
     this.programId = programId || PROGRAM_ID;
     this.network = ALEO_NETWORK;
+    this.circuitBreaker = new CircuitBreaker({
+      failureThreshold: CB_FAILURE_THRESHOLD,
+      resetTimeoutMs: CB_RESET_TIMEOUT_MS,
+      onStateChange: (from, to) => {
+        logger?.info(`Aleo RPC circuit breaker: ${from} → ${to}`);
+      },
+    });
   }
 
   /**
-   * Make a request to the Aleo RPC with retries
+   * Make a request to the Aleo RPC with exponential backoff + circuit breaker.
+   * Retries network errors with jitter to prevent thundering herd.
+   * Circuit breaker stops retries when the RPC is persistently down.
    */
   private async fetchWithRetry(
     url: string,
     options: RequestInit = {},
-    retries: number = MAX_RETRIES
   ): Promise<Response> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        const response = await fetch(url, {
+    return this.circuitBreaker.execute(() =>
+      withRetry(
+        () => fetch(url, {
           ...options,
           headers: {
             'Content-Type': 'application/json',
             ...options.headers,
           },
-        });
-        return response;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        logger?.warn(`Aleo RPC request failed (attempt ${attempt + 1}/${retries}): ${lastError.message}`);
+        }),
+        {
+          maxRetries: MAX_RETRIES,
+          baseDelayMs: BASE_DELAY_MS,
+          maxDelayMs: MAX_DELAY_MS,
+          jitterFactor: 0.3,
+          shouldRetry: (error) => {
+            // Only retry network/timeout errors, not HTTP-level errors
+            const msg = error.message.toLowerCase();
+            return msg.includes('fetch') ||
+                   msg.includes('network') ||
+                   msg.includes('timeout') ||
+                   msg.includes('econnrefused') ||
+                   msg.includes('econnreset') ||
+                   msg.includes('socket');
+          },
+          onRetry: (error, attempt, delayMs) => {
+            logger?.warn(
+              `Aleo RPC retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms: ${error.message}`
+            );
+          },
+        },
+      )
+    );
+  }
 
-        if (attempt < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
-        }
-      }
-    }
-
-    throw lastError || new Error('Failed to connect to Aleo RPC');
+  /**
+   * Get the circuit breaker stats (for health checks / monitoring)
+   */
+  getCircuitBreakerStats() {
+    return this.circuitBreaker.getStats();
   }
 
   /**

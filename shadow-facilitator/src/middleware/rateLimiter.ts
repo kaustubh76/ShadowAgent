@@ -257,6 +257,97 @@ export class FixedWindowCounterLimiter implements RateLimiter {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Redis-Backed Fixed Window Counter — for restart-resilient rate limiting
+//
+// Uses Redis INCR+EXPIRE when connected, falls back to in-memory
+// FixedWindowCounterLimiter when Redis is unavailable.
+// ═══════════════════════════════════════════════════════════════════
+
+export interface RedisRateLimitAdapter {
+  increment(category: string, key: string, windowMs: number): Promise<number>;
+  getCount(category: string, key: string): Promise<number>;
+  reset(category: string, key: string): Promise<boolean>;
+  isAvailable(): boolean;
+}
+
+export class RedisBackedFixedWindowLimiter implements RateLimiter {
+  private fallback: FixedWindowCounterLimiter;
+  private redis: RedisRateLimitAdapter | null;
+  private category: string;
+  private maxRequests: number;
+  private windowMs: number;
+
+  constructor(
+    config: RateLimiterConfig & { category: string },
+    redis?: RedisRateLimitAdapter,
+  ) {
+    this.maxRequests = config.maxRequests;
+    this.windowMs = config.windowMs;
+    this.category = config.category;
+    this.redis = redis || null;
+    this.fallback = new FixedWindowCounterLimiter(config);
+  }
+
+  /**
+   * Check rate limit. Uses Redis when available, in-memory otherwise.
+   * Note: Redis path is async but we return a sync result.
+   * For the sync RateLimiter interface, this uses the in-memory fallback.
+   * Use checkAsync() for Redis-backed checking.
+   */
+  check(key: string): RateLimitResult {
+    // Sync path always uses in-memory fallback
+    return this.fallback.check(key);
+  }
+
+  /**
+   * Async check that uses Redis when available.
+   */
+  async checkAsync(key: string): Promise<RateLimitResult> {
+    if (!this.redis?.isAvailable()) {
+      return this.fallback.check(key);
+    }
+
+    try {
+      const count = await this.redis.increment(this.category, key, this.windowMs);
+
+      if (count < 0) {
+        // Redis error — fall back to in-memory
+        return this.fallback.check(key);
+      }
+
+      if (count > this.maxRequests) {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: Date.now() + this.windowMs,
+          retryAfter: Math.ceil(this.windowMs / 1000),
+        };
+      }
+
+      return {
+        allowed: true,
+        remaining: this.maxRequests - count,
+        resetAt: Date.now() + this.windowMs,
+      };
+    } catch {
+      // Redis failure — fall back to in-memory
+      return this.fallback.check(key);
+    }
+  }
+
+  reset(key: string): void {
+    this.fallback.reset(key);
+    if (this.redis?.isAvailable()) {
+      this.redis.reset(this.category, key).catch(() => {});
+    }
+  }
+
+  cleanup(): void {
+    this.fallback.cleanup();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Express Middleware Factories
 // ═══════════════════════════════════════════════════════════════════
 
@@ -334,15 +425,49 @@ export function createAddressRateLimiter(options: RateLimitMiddlewareOptions) {
     const key = `addr:${keyExtractor(req)}`;
     const result = limiter.check(key);
 
+    // Set standard rate limit headers
+    res.setHeader('X-RateLimit-Limit', options.maxRequests);
+    res.setHeader('X-RateLimit-Remaining', result.remaining);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(result.resetAt / 1000));
+
     if (!result.allowed) {
       res.setHeader('Retry-After', result.retryAfter || 1);
+      if (options.onLimitReached) {
+        options.onLimitReached(req, res);
+        return;
+      }
       res.status(429).json({
-        error: options.message || 'Rate limit exceeded for this address',
+        error: options.message || 'Too many requests for this address',
         retryAfter: result.retryAfter,
       });
       return;
     }
 
     next();
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Redis Adapter Factory
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Create a RedisRateLimitAdapter from the RedisService.
+ * Usage:
+ *   import { getRedisService } from '../services/redis';
+ *   const adapter = createRedisAdapter(getRedisService());
+ *   const limiter = new RedisBackedFixedWindowLimiter({ ... }, adapter);
+ */
+export function createRedisAdapter(redisService: {
+  incrementRateLimit(category: string, key: string, windowMs: number): Promise<number>;
+  getRateLimitCount(category: string, key: string): Promise<number>;
+  resetRateLimit(category: string, key: string): Promise<boolean>;
+  isConnected(): boolean;
+}): RedisRateLimitAdapter {
+  return {
+    increment: (cat, key, windowMs) => redisService.incrementRateLimit(cat, key, windowMs),
+    getCount: (cat, key) => redisService.getRateLimitCount(cat, key),
+    reset: (cat, key) => redisService.resetRateLimit(cat, key),
+    isAvailable: () => redisService.isConnected(),
   };
 }

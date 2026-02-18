@@ -1,8 +1,18 @@
 // Multi-Sig Escrow Routes (Phase 10a)
 
 import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 const router = Router();
+
+// Per-address rate limiting: 10 multisig operations per minute
+const multisigLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.multisig,
+  keyExtractor: (req: Request) => req.body?.owner || req.body?.signer_address || req.ip || 'unknown',
+  message: 'Too many multisig requests, please try again later',
+});
 
 // In-memory store (production: Redis/PostgreSQL)
 interface MultiSigEscrowRecord {
@@ -21,7 +31,11 @@ interface MultiSigEscrowRecord {
   updated_at: string;
 }
 
-const multisigStore = new Map<string, MultiSigEscrowRecord>();
+// Escrows expire after 30 days
+const multisigStore = new TTLStore<MultiSigEscrowRecord>({
+  maxSize: 50_000,
+  defaultTTLMs: 30 * 86_400_000,
+});
 
 // Per-job mutex to prevent race conditions on concurrent approvals
 const approvalLocks = new Map<string, Promise<void>>();
@@ -44,7 +58,7 @@ async function withJobLock<T>(jobHash: string, fn: () => Promise<T>): Promise<T>
 }
 
 // POST /escrows/multisig - Create a multi-sig escrow
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', multisigLimiter, async (req: Request, res: Response) => {
   try {
     const {
       agent,
@@ -111,7 +125,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/pending/:address', async (req: Request, res: Response) => {
   const { address } = req.params;
 
-  const pending = Array.from(multisigStore.values()).filter(escrow => {
+  const pending = multisigStore.values().filter(escrow => {
     if (escrow.status !== 'locked') return false;
     const signerIndex = escrow.signers.indexOf(address);
     return signerIndex !== -1 && !escrow.approvals[signerIndex];
@@ -134,7 +148,7 @@ router.get('/:jobHash', async (req: Request, res: Response) => {
 });
 
 // POST /escrows/multisig/:jobHash/approve - Submit an approval
-router.post('/:jobHash/approve', async (req: Request, res: Response) => {
+router.post('/:jobHash/approve', multisigLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { signer_address, secret } = req.body;
 

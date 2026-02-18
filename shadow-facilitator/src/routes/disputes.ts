@@ -1,8 +1,27 @@
 // Dispute Resolution Routes (Phase 10a)
 
 import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 const router = Router();
+
+// Per-address rate limiting: 3 disputes per hour
+const disputeLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.dispute,
+  keyExtractor: (req: Request) => req.body?.client || req.body?.agent || req.ip || 'unknown',
+  message: 'Too many dispute requests, please try again later',
+});
+
+// Rate limiter for dispute responses/resolutions (reuse dispute config with 2x allowance)
+const disputeActionLimiter = createAddressRateLimiter({
+  windowMs: config.rateLimit.perAddress.dispute.windowMs,
+  maxRequests: config.rateLimit.perAddress.dispute.maxRequests * 2,
+  keyExtractor: (req: Request) =>
+    req.body?.agent_id || req.body?.admin_address || req.ip || 'unknown',
+  message: 'Too many dispute action requests, please try again later',
+});
 
 // In-memory store (production: Redis/PostgreSQL)
 interface DisputeRecord {
@@ -19,10 +38,14 @@ interface DisputeRecord {
   resolved_at?: string;
 }
 
-const disputeStore = new Map<string, DisputeRecord>();
+// Disputes expire after 90 days
+const disputeStore = new TTLStore<DisputeRecord>({
+  maxSize: 50_000,
+  defaultTTLMs: 90 * 86_400_000,
+});
 
 // POST /disputes - Open a dispute
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', disputeLimiter, async (req: Request, res: Response) => {
   try {
     const { agent, job_hash, escrow_amount, evidence_hash, client } = req.body;
 
@@ -78,7 +101,7 @@ router.get('/:jobHash', async (req: Request, res: Response) => {
 router.get('/', async (req: Request, res: Response) => {
   const { agent_id, client, status } = req.query;
 
-  let disputes = Array.from(disputeStore.values());
+  let disputes = disputeStore.values();
 
   if (agent_id) {
     disputes = disputes.filter(d => d.agent === agent_id);
@@ -98,7 +121,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // POST /disputes/:jobHash/respond - Agent responds with counter-evidence
-router.post('/:jobHash/respond', async (req: Request, res: Response) => {
+router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { evidence_hash } = req.body;
   const dispute = disputeStore.get(jobHash);
@@ -129,7 +152,7 @@ router.post('/:jobHash/respond', async (req: Request, res: Response) => {
 });
 
 // POST /disputes/:jobHash/resolve - Admin resolves dispute
-router.post('/:jobHash/resolve', async (req: Request, res: Response) => {
+router.post('/:jobHash/resolve', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { agent_percentage } = req.body;
   const dispute = disputeStore.get(jobHash);

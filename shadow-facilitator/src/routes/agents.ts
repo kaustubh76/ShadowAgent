@@ -3,22 +3,45 @@
 import { Router, Request, Response } from 'express';
 import { indexerService } from '../services/indexer';
 import { SearchParams, ServiceType, Tier } from '../types';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 const router = Router();
+
+// Per-address rate limiters (Fixed Window Counter)
+const registrationLimiter = createAddressRateLimiter({
+  maxRequests: config.rateLimit.perAddress.registration.maxRequests,
+  windowMs: config.rateLimit.perAddress.registration.windowMs,
+  keyExtractor: (req) => req.body?.address || req.ip || 'unknown',
+  message: 'Too many registration attempts, please try again later',
+});
+
+const ratingLimiter = createAddressRateLimiter({
+  maxRequests: config.rateLimit.perAddress.rating.maxRequests,
+  windowMs: config.rateLimit.perAddress.rating.windowMs,
+  keyExtractor: (req) => req.ip || 'unknown',
+  message: 'Too many rating submissions, please try again later',
+});
 
 // GET /agents - Search agents with filters
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const parsedServiceType = parseInt(req.query.service_type as string);
+    const parsedMinTier = parseInt(req.query.min_tier as string);
+    const parsedLimit = parseInt(req.query.limit as string);
+    const parsedOffset = parseInt(req.query.offset as string);
+
     const params: SearchParams = {
-      service_type: req.query.service_type
-        ? parseInt(req.query.service_type as string) as ServiceType
+      service_type: Number.isFinite(parsedServiceType)
+        ? parsedServiceType as ServiceType
         : undefined,
-      min_tier: req.query.min_tier
-        ? parseInt(req.query.min_tier as string) as Tier
+      min_tier: Number.isFinite(parsedMinTier)
+        ? parsedMinTier as Tier
         : undefined,
       is_active: req.query.is_active !== 'false',
-      limit: Math.min(parseInt(req.query.limit as string) || 20, 100),
-      offset: parseInt(req.query.offset as string) || 0,
+      limit: Math.min(Number.isFinite(parsedLimit) ? parsedLimit : 20, 100),
+      offset: Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0,
     };
 
     const result = await indexerService.searchAgents(params);
@@ -49,16 +72,39 @@ interface RatingRecord {
   created_at: string;
 }
 
-const ratingStore = new Map<string, RatingRecord[]>();
-const usedNullifiers = new Set<string>();
+// Ratings stored for 1 year; nullifiers are permanent (use TTL as upper bound)
+const ratingStore = new TTLStore<RatingRecord[]>({
+  maxSize: 100_000,
+  defaultTTLMs: 365 * 86_400_000,
+});
+const nullifierStore = new TTLStore<boolean>({
+  maxSize: 500_000,
+  defaultTTLMs: 365 * 86_400_000,
+});
+
+// Validate Aleo address format: must start with "aleo1" and contain valid characters
+function isValidAleoAddress(address: string): boolean {
+  return typeof address === 'string' && /^aleo1[a-z0-9_]{5,}$/.test(address);
+}
 
 // POST /agents/register - Notify facilitator of on-chain agent registration
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', registrationLimiter, async (req: Request, res: Response) => {
   try {
     const { service_type, address, tx_id } = req.body;
 
     if (!service_type && !address) {
       res.status(400).json({ error: 'Missing required fields: service_type or address' });
+      return;
+    }
+
+    if (address && !isValidAleoAddress(address)) {
+      res.status(400).json({ error: 'Invalid address format: must start with aleo1' });
+      return;
+    }
+
+    const parsedType = Number(service_type);
+    if (service_type !== undefined && (!Number.isFinite(parsedType) || parsedType < 0 || parsedType > 10)) {
+      res.status(400).json({ error: 'Invalid service_type: must be 0-10' });
       return;
     }
 
@@ -84,6 +130,11 @@ router.post('/unregister', async (req: Request, res: Response) => {
 
     if (!id) {
       res.status(400).json({ error: 'Missing required field: agent_id or address' });
+      return;
+    }
+
+    if (typeof id !== 'string' || id.length > 100) {
+      res.status(400).json({ error: 'Invalid agent_id format' });
       return;
     }
 
@@ -123,7 +174,7 @@ router.get('/by-address/:publicKey', async (req: Request, res: Response) => {
 });
 
 // POST /agents/:agentId/rating - Submit a rating for an agent
-router.post('/:agentId/rating', async (req: Request, res: Response) => {
+router.post('/:agentId/rating', ratingLimiter, async (req: Request, res: Response) => {
   try {
     const { agentId } = req.params;
     const { job_hash, rating, payment_amount, nullifier, tx_id, on_chain } = req.body;
@@ -133,13 +184,22 @@ router.post('/:agentId/rating', async (req: Request, res: Response) => {
       return;
     }
 
-    if (rating < 1 || rating > 50) {
-      res.status(400).json({ error: 'Rating must be between 1 and 50 (scaled)' });
+    const parsedRating = Number(rating);
+    if (!Number.isFinite(parsedRating) || !Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 50) {
+      res.status(400).json({ error: 'Rating must be an integer between 1 and 50 (scaled)' });
       return;
     }
 
+    if (payment_amount !== undefined) {
+      const parsedAmount = Number(payment_amount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        res.status(400).json({ error: 'payment_amount must be a non-negative number' });
+        return;
+      }
+    }
+
     // Prevent double-rating via nullifier
-    if (nullifier && usedNullifiers.has(nullifier)) {
+    if (nullifier && nullifierStore.has(nullifier)) {
       res.status(409).json({ error: 'Rating already submitted for this job' });
       return;
     }
@@ -160,7 +220,7 @@ router.post('/:agentId/rating', async (req: Request, res: Response) => {
     ratingStore.get(agentId)!.push(record);
 
     if (nullifier) {
-      usedNullifiers.add(nullifier);
+      nullifierStore.set(nullifier, true);
     }
 
     res.status(201).json({ success: true, rating: record });

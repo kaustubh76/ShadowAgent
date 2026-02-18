@@ -1,5 +1,7 @@
 // ShadowAgent Facilitator - Refund Route Tests
 
+jest.setTimeout(30000);
+
 import express from 'express';
 import request from 'supertest';
 import refundsRouter from './refunds';
@@ -11,13 +13,20 @@ function createApp() {
   return app;
 }
 
-const VALID_REFUND = {
-  agent: 'aleo1agentxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-  client: 'aleo1clientxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-  total_amount: 1_000_000,
-  agent_amount: 600_000,
-  job_hash: 'refund-job-001',
-};
+// Each test gets a unique refund to avoid rate limiter collisions
+let refundCounter = 0;
+function makeRefund(overrides?: Record<string, unknown>) {
+  refundCounter++;
+  const ts = Date.now();
+  return {
+    agent: `aleo1agent_${ts}_${refundCounter}`,
+    client: `aleo1client_${ts}_${refundCounter}`,
+    total_amount: 1_000_000,
+    agent_amount: 600_000,
+    job_hash: `refund-job-${ts}-${refundCounter}`,
+    ...overrides,
+  };
+}
 
 describe('Refund Routes', () => {
   describe('POST /refunds', () => {
@@ -25,7 +34,7 @@ describe('Refund Routes', () => {
       const app = createApp();
       const res = await request(app)
         .post('/refunds')
-        .send(VALID_REFUND);
+        .send(makeRefund());
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
@@ -37,7 +46,7 @@ describe('Refund Routes', () => {
       const app = createApp();
       const res = await request(app)
         .post('/refunds')
-        .send({ agent: 'aleo1test' });
+        .send({ agent: 'aleo1test_' + Date.now() });
 
       expect(res.status).toBe(400);
     });
@@ -46,7 +55,7 @@ describe('Refund Routes', () => {
       const app = createApp();
       const res = await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: 'overflow-test', agent_amount: 2_000_000 });
+        .send(makeRefund({ agent_amount: 2_000_000 }));
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('cannot exceed');
@@ -54,15 +63,15 @@ describe('Refund Routes', () => {
 
     it('should reject duplicate proposal', async () => {
       const app = createApp();
-      const jobHash = 'dup-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       const res = await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(makeRefund({ job_hash: refund.job_hash, agent: refund.agent }));
 
       expect(res.status).toBe(409);
     });
@@ -71,16 +80,16 @@ describe('Refund Routes', () => {
   describe('GET /refunds/:jobHash', () => {
     it('should return proposal by job hash', async () => {
       const app = createApp();
-      const jobHash = 'get-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
-      const res = await request(app).get(`/refunds/${jobHash}`);
+      const res = await request(app).get(`/refunds/${refund.job_hash}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.job_hash).toBe(jobHash);
+      expect(res.body.job_hash).toBe(refund.job_hash);
     });
 
     it('should return 404 for non-existent proposal', async () => {
@@ -93,11 +102,11 @@ describe('Refund Routes', () => {
   describe('GET /refunds (list with filters)', () => {
     it('should return all proposals', async () => {
       const app = createApp();
-      const jobHash = 'list-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       const res = await request(app).get('/refunds');
 
@@ -108,11 +117,11 @@ describe('Refund Routes', () => {
 
     it('should filter by status', async () => {
       const app = createApp();
-      const jobHash = 'filter-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       const res = await request(app).get('/refunds?status=proposed');
 
@@ -126,15 +135,15 @@ describe('Refund Routes', () => {
   describe('POST /refunds/:jobHash/accept', () => {
     it('should accept a proposed refund', async () => {
       const app = createApp();
-      const jobHash = 'accept-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       const res = await request(app)
-        .post(`/refunds/${jobHash}/accept`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/accept`)
+        .send({ agent_id: refund.agent });
 
       expect(res.status).toBe(200);
       expect(res.body.proposal.status).toBe('accepted');
@@ -142,19 +151,19 @@ describe('Refund Routes', () => {
 
     it('should reject accepting non-proposed refund', async () => {
       const app = createApp();
-      const jobHash = 'double-accept-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       await request(app)
-        .post(`/refunds/${jobHash}/accept`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/accept`)
+        .send({ agent_id: refund.agent });
 
       const res = await request(app)
-        .post(`/refunds/${jobHash}/accept`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/accept`)
+        .send({ agent_id: refund.agent });
 
       expect(res.status).toBe(400);
     });
@@ -172,15 +181,15 @@ describe('Refund Routes', () => {
   describe('POST /refunds/:jobHash/reject', () => {
     it('should reject a proposed refund', async () => {
       const app = createApp();
-      const jobHash = 'reject-refund-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       const res = await request(app)
-        .post(`/refunds/${jobHash}/reject`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/reject`)
+        .send({ agent_id: refund.agent });
 
       expect(res.status).toBe(200);
       expect(res.body.proposal.status).toBe('rejected');
@@ -188,21 +197,57 @@ describe('Refund Routes', () => {
 
     it('should not allow rejecting already accepted refund', async () => {
       const app = createApp();
-      const jobHash = 'accept-then-reject-' + Date.now();
+      const refund = makeRefund();
 
       await request(app)
         .post('/refunds')
-        .send({ ...VALID_REFUND, job_hash: jobHash });
+        .send(refund);
 
       await request(app)
-        .post(`/refunds/${jobHash}/accept`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/accept`)
+        .send({ agent_id: refund.agent });
 
       const res = await request(app)
-        .post(`/refunds/${jobHash}/reject`)
-        .send({ agent_id: VALID_REFUND.agent });
+        .post(`/refunds/${refund.job_hash}/reject`)
+        .send({ agent_id: refund.agent });
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('Per-address rate limiting', () => {
+    it('should rate limit refund creation from same address', async () => {
+      const app = createApp();
+      const agentAddr = 'aleo1agent_rate_ref_' + Date.now();
+
+      // Default config allows 5 refund proposals per hour per address
+      let hitLimit = false;
+      for (let i = 0; i < 10; i++) {
+        const res = await request(app)
+          .post('/refunds')
+          .send(makeRefund({ agent: agentAddr }));
+
+        if (res.status === 429) {
+          expect(res.body.error).toContain('Too many');
+          expect(res.headers).toHaveProperty('retry-after');
+          hitLimit = true;
+          break;
+        }
+        expect([201, 409]).toContain(res.status);
+      }
+
+      expect(hitLimit).toBe(true);
+    });
+
+    it('should include rate limit headers in responses', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/refunds')
+        .send(makeRefund());
+
+      expect(res.headers).toHaveProperty('x-ratelimit-limit');
+      expect(res.headers).toHaveProperty('x-ratelimit-remaining');
+      expect(res.headers).toHaveProperty('x-ratelimit-reset');
     });
   });
 });

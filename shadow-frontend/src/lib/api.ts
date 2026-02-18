@@ -69,7 +69,7 @@ const EMPTY_SEARCH: SearchResult = { agents: [], total: 0, limit: 20, offset: 0 
 // Retry + Cache helpers
 // ═══════════════════════════════════════════════════════════════════
 
-async function fetchWithRetry(
+export async function fetchWithRetry(
   url: string,
   options?: RequestInit,
   retries = 2,
@@ -78,6 +78,17 @@ async function fetchWithRetry(
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, options);
+
+      // Retry on 429 with Retry-After backoff
+      if (response.status === 429 && i < retries) {
+        const retryAfter = response.headers.get('Retry-After');
+        const waitMs = retryAfter
+          ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
+          : delay * (i + 1);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
       if (response.ok || response.status < 500) return response;
       if (i < retries) await new Promise(r => setTimeout(r, delay * (i + 1)));
     } catch (err) {

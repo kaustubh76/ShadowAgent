@@ -714,6 +714,82 @@ describe('ShadowAgentClient - additional methods', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
+    it('should retry on 429 and succeed on second attempt', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: new Map([['Retry-After', '0']]),
+        json: () => Promise.resolve({ error: 'Rate limit exceeded' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: 'ok' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api', {
+        maxRetries: 1,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ data: 'ok' });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should return retryAfter when 429 exhausts retries', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: new Map([['Retry-After', '5']]),
+        json: () => Promise.resolve({ error: 'Rate limit exceeded' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api', {
+        maxRetries: 0,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Rate limit');
+      expect(result.retryAfter).toBe(5);
+    });
+
+    it('should not retry 429 when no retries left', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: new Map([['Retry-After', '1']]),
+        json: () => Promise.resolve({ error: 'Too many requests' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api', {
+        maxRetries: 0,
+      });
+
+      expect(result.success).toBe(false);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not retry non-429 4xx errors', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ error: 'Bad request' }),
+      });
+
+      const client = createClient();
+      const result = await client.request('http://agent.example.com/api', {
+        maxRetries: 2,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Bad request');
+      expect(result.retryAfter).toBeUndefined();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('should use GET method by default', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

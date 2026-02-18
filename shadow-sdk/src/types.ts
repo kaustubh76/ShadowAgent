@@ -278,6 +278,7 @@ export interface RequestResult<T = unknown> {
   error?: string;
   jobHash?: string;
   paymentProof?: EscrowProof;
+  retryAfter?: number;
 }
 
 /**

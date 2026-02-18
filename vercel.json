@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd shadow-sdk && npm ci && npm run build && cd ../shadow-frontend && npm ci && npm run build",
+  "outputDirectory": "shadow-frontend/dist",
+  "installCommand": "echo 'skipping root install'",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

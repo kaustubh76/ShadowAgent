@@ -1,5 +1,8 @@
 // ShadowAgent Facilitator - Cross-Route Integration Tests
 
+// Integration tests involve many sequential requests — increase default timeout
+jest.setTimeout(30000);
+
 // Mock the index module (logger) to prevent full app bootstrap
 jest.mock('../index', () => ({
   logger: {

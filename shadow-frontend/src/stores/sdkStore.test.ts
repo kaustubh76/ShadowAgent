@@ -57,7 +57,6 @@ describe('sdkStore', () => {
     });
 
     it('does nothing without client', () => {
-      // Should not throw
       useSDKStore.getState().updateConfig({ network: 'mainnet' });
     });
   });
@@ -99,6 +98,55 @@ describe('sdkStore', () => {
       useSDKStore.setState({ client: mockClient, isInitialized: true });
       const client = useSDKStore.getState().getClient();
       expect(client).toBe(mockClient);
+    });
+  });
+
+  describe('checkHealth edge cases', () => {
+    it('sets lastHealthCheck even on failure', async () => {
+      const mockClient = createMockClient();
+      mockClient.getHealth.mockRejectedValueOnce(new Error('timeout'));
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
+      await useSDKStore.getState().checkHealth();
+      const state = useSDKStore.getState();
+      expect(state.facilitatorHealthy).toBe(false);
+      expect(state.lastHealthCheck).toBeGreaterThan(0);
+    });
+
+    it('handles non-ok health status', async () => {
+      const mockClient = createMockClient();
+      mockClient.getHealth.mockResolvedValueOnce({ status: 'degraded' });
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
+      const result = await useSDKStore.getState().checkHealth();
+      expect(result).toEqual({ status: 'degraded' });
+      expect(useSDKStore.getState().facilitatorHealthy).toBe(false);
+    });
+
+    it('handles health response with blockHeight', async () => {
+      const mockClient = createMockClient();
+      mockClient.getHealth.mockResolvedValueOnce({ status: 'ok', blockHeight: 12345 });
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
+      const result = await useSDKStore.getState().checkHealth();
+      expect(result).toEqual({ status: 'ok', blockHeight: 12345 });
+      expect(useSDKStore.getState().facilitatorHealthy).toBe(true);
+    });
+  });
+
+  describe('multiple operations', () => {
+    it('checkHealth called multiple times updates state', async () => {
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
+      await useSDKStore.getState().checkHealth();
+      await useSDKStore.getState().checkHealth();
+      expect(mockClient.getHealth).toHaveBeenCalledTimes(2);
+    });
+
+    it('updateConfig after checkHealth preserves health state', async () => {
+      const mockClient = createMockClient();
+      useSDKStore.setState({ client: mockClient, isInitialized: true });
+      await useSDKStore.getState().checkHealth();
+      useSDKStore.getState().updateConfig({ timeout: 10000 });
+      expect(useSDKStore.getState().facilitatorHealthy).toBe(true);
+      expect(mockClient.setConfig).toHaveBeenCalledWith({ timeout: 10000 });
     });
   });
 });

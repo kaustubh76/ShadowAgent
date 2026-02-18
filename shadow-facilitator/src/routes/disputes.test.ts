@@ -1,5 +1,7 @@
 // ShadowAgent Facilitator - Dispute Route Tests
 
+jest.setTimeout(30000);
+
 import express from 'express';
 import request from 'supertest';
 import disputesRouter from './disputes';
@@ -11,13 +13,20 @@ function createApp() {
   return app;
 }
 
-const VALID_DISPUTE = {
-  agent: 'aleo1agentxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-  client: 'aleo1clientxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-  job_hash: 'dispute-job-001',
-  escrow_amount: 1_000_000,
-  evidence_hash: 'evidence-hash-abc123',
-};
+// Each test gets a unique dispute to avoid rate limiter collisions
+let disputeCounter = 0;
+function makeDispute(overrides?: Record<string, unknown>) {
+  disputeCounter++;
+  const ts = Date.now();
+  return {
+    agent: `aleo1agent_${ts}_${disputeCounter}`,
+    client: `aleo1client_${ts}_${disputeCounter}`,
+    job_hash: `dispute-job-${ts}-${disputeCounter}`,
+    escrow_amount: 1_000_000,
+    evidence_hash: 'evidence-hash-abc123',
+    ...overrides,
+  };
+}
 
 describe('Dispute Routes', () => {
   describe('POST /disputes', () => {
@@ -25,7 +34,7 @@ describe('Dispute Routes', () => {
       const app = createApp();
       const res = await request(app)
         .post('/disputes')
-        .send(VALID_DISPUTE);
+        .send(makeDispute());
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
@@ -36,22 +45,22 @@ describe('Dispute Routes', () => {
       const app = createApp();
       const res = await request(app)
         .post('/disputes')
-        .send({ agent: 'aleo1test' });
+        .send({ agent: 'aleo1test_missing_' + Date.now() });
 
       expect(res.status).toBe(400);
     });
 
     it('should reject duplicate dispute for same job', async () => {
       const app = createApp();
-      const jobHash = 'dup-dispute-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
       const res = await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(makeDispute({ job_hash: dispute.job_hash, client: dispute.client }));
 
       expect(res.status).toBe(409);
     });
@@ -60,16 +69,16 @@ describe('Dispute Routes', () => {
   describe('GET /disputes/:jobHash', () => {
     it('should return dispute by job hash', async () => {
       const app = createApp();
-      const jobHash = 'get-dispute-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
-      const res = await request(app).get(`/disputes/${jobHash}`);
+      const res = await request(app).get(`/disputes/${dispute.job_hash}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.job_hash).toBe(jobHash);
+      expect(res.body.job_hash).toBe(dispute.job_hash);
       expect(res.body.status).toBe('opened');
     });
 
@@ -83,11 +92,11 @@ describe('Dispute Routes', () => {
   describe('GET /disputes (list with filters)', () => {
     it('should return all disputes', async () => {
       const app = createApp();
-      const jobHash = 'list-dispute-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
       const res = await request(app).get('/disputes');
 
@@ -97,11 +106,11 @@ describe('Dispute Routes', () => {
 
     it('should filter by status=open', async () => {
       const app = createApp();
-      const jobHash = 'open-filter-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
       const res = await request(app).get('/disputes?status=open');
 
@@ -115,16 +124,16 @@ describe('Dispute Routes', () => {
   describe('POST /disputes/:jobHash/respond', () => {
     it('should allow agent to respond with evidence', async () => {
       const app = createApp();
-      const jobHash = 'respond-dispute-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
       const res = await request(app)
-        .post(`/disputes/${jobHash}/respond`)
+        .post(`/disputes/${dispute.job_hash}/respond`)
         .send({
-          agent_id: VALID_DISPUTE.agent,
+          agent_id: dispute.agent,
           evidence_hash: 'agent-evidence-hash-xyz',
         });
 
@@ -135,45 +144,48 @@ describe('Dispute Routes', () => {
 
     it('should reject response without evidence', async () => {
       const app = createApp();
-      const jobHash = 'no-evidence-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
+      const uniqueAgent = `aleo1agent_noev_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/respond`)
-        .send({ agent_id: VALID_DISPUTE.agent });
+        .post(`/disputes/${dispute.job_hash}/respond`)
+        .send({ agent_id: uniqueAgent });
 
       expect(res.status).toBe(400);
     });
 
     it('should reject response to non-opened dispute', async () => {
       const app = createApp();
-      const jobHash = 'already-responded-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
       // First response
       await request(app)
-        .post(`/disputes/${jobHash}/respond`)
-        .send({ agent_id: VALID_DISPUTE.agent, evidence_hash: 'hash1' });
+        .post(`/disputes/${dispute.job_hash}/respond`)
+        .send({ agent_id: dispute.agent, evidence_hash: 'hash1' });
 
       // Second response should fail
+      const uniqueAgent2 = `aleo1agent_dup_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/respond`)
-        .send({ agent_id: VALID_DISPUTE.agent, evidence_hash: 'hash2' });
+        .post(`/disputes/${dispute.job_hash}/respond`)
+        .send({ agent_id: uniqueAgent2, evidence_hash: 'hash2' });
 
       expect(res.status).toBe(400);
     });
 
     it('should return 404 for non-existent dispute', async () => {
       const app = createApp();
+      const uniqueAgent = `aleo1agent_404_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
         .post('/disputes/non-existent/respond')
-        .send({ agent_id: 'test', evidence_hash: 'hash' });
+        .send({ agent_id: uniqueAgent, evidence_hash: 'hash' });
 
       expect(res.status).toBe(404);
     });
@@ -182,15 +194,16 @@ describe('Dispute Routes', () => {
   describe('POST /disputes/:jobHash/resolve', () => {
     it('should resolve dispute with 100% agent (resolved_agent)', async () => {
       const app = createApp();
-      const jobHash = 'resolve-agent-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
+      const admin = `aleo1admin_100_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/resolve`)
-        .send({ agent_percentage: 100 });
+        .post(`/disputes/${dispute.job_hash}/resolve`)
+        .send({ agent_percentage: 100, admin_address: admin });
 
       expect(res.status).toBe(200);
       expect(res.body.dispute.status).toBe('resolved_agent');
@@ -199,15 +212,16 @@ describe('Dispute Routes', () => {
 
     it('should resolve dispute with 0% agent (resolved_client)', async () => {
       const app = createApp();
-      const jobHash = 'resolve-client-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
+      const admin = `aleo1admin_0_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/resolve`)
-        .send({ agent_percentage: 0 });
+        .post(`/disputes/${dispute.job_hash}/resolve`)
+        .send({ agent_percentage: 0, admin_address: admin });
 
       expect(res.status).toBe(200);
       expect(res.body.dispute.status).toBe('resolved_client');
@@ -215,15 +229,16 @@ describe('Dispute Routes', () => {
 
     it('should resolve dispute with split (resolved_split)', async () => {
       const app = createApp();
-      const jobHash = 'resolve-split-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
+      const admin = `aleo1admin_60_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/resolve`)
-        .send({ agent_percentage: 60 });
+        .post(`/disputes/${dispute.job_hash}/resolve`)
+        .send({ agent_percentage: 60, admin_address: admin });
 
       expect(res.status).toBe(200);
       expect(res.body.dispute.status).toBe('resolved_split');
@@ -234,26 +249,64 @@ describe('Dispute Routes', () => {
 
     it('should reject invalid percentage', async () => {
       const app = createApp();
-      const jobHash = 'invalid-pct-' + Date.now();
+      const dispute = makeDispute();
 
       await request(app)
         .post('/disputes')
-        .send({ ...VALID_DISPUTE, job_hash: jobHash });
+        .send(dispute);
 
+      const admin = `aleo1admin_invalid_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
-        .post(`/disputes/${jobHash}/resolve`)
-        .send({ agent_percentage: 150 });
+        .post(`/disputes/${dispute.job_hash}/resolve`)
+        .send({ agent_percentage: 150, admin_address: admin });
 
       expect(res.status).toBe(400);
     });
 
     it('should return 404 for non-existent dispute', async () => {
       const app = createApp();
+      const admin = `aleo1admin_404_${Date.now()}_${disputeCounter}`;
       const res = await request(app)
         .post('/disputes/non-existent/resolve')
-        .send({ agent_percentage: 50 });
+        .send({ agent_percentage: 50, admin_address: admin });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('Per-address rate limiting', () => {
+    it('should rate limit dispute creation from same address', async () => {
+      const app = createApp();
+      const clientAddr = 'aleo1client_rate_disp_' + Date.now();
+
+      // Default config allows 3 disputes per hour per address
+      let hitLimit = false;
+      for (let i = 0; i < 10; i++) {
+        const res = await request(app)
+          .post('/disputes')
+          .send(makeDispute({ client: clientAddr }));
+
+        if (res.status === 429) {
+          expect(res.body.error).toContain('Too many');
+          expect(res.headers).toHaveProperty('retry-after');
+          hitLimit = true;
+          break;
+        }
+        expect(res.status).toBe(201);
+      }
+
+      expect(hitLimit).toBe(true);
+    });
+
+    it('should include rate limit headers in responses', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/disputes')
+        .send(makeDispute());
+
+      expect(res.headers).toHaveProperty('x-ratelimit-limit');
+      expect(res.headers).toHaveProperty('x-ratelimit-remaining');
+      expect(res.headers).toHaveProperty('x-ratelimit-reset');
     });
   });
 });

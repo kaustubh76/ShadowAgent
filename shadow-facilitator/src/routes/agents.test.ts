@@ -76,6 +76,46 @@ describe('Agent Routes', () => {
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Missing required fields');
     });
+
+    it('should reject invalid address format', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/register')
+        .send({ service_type: 1, address: 'invalid_address' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid address format');
+    });
+
+    it('should reject address not starting with aleo1', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/register')
+        .send({ service_type: 1, address: 'btc1abcdefghijklmno' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid address format');
+    });
+
+    it('should reject out-of-range service_type', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/register')
+        .send({ service_type: 99, address: 'aleo1validaddresstest' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid service_type');
+    });
+
+    it('should reject negative service_type', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/register')
+        .send({ service_type: -1, address: 'aleo1validaddresstest' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid service_type');
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════
@@ -113,6 +153,16 @@ describe('Agent Routes', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Missing required field');
+    });
+
+    it('should reject overly long agent_id', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/unregister')
+        .send({ agent_id: 'a'.repeat(101) });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid agent_id format');
     });
   });
 
@@ -176,6 +226,36 @@ describe('Agent Routes', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('between 1 and 50');
+    });
+
+    it('should reject non-integer rating', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/agent123/rating')
+        .send({ job_hash: 'job_float', rating: 3.7 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('integer');
+    });
+
+    it('should reject NaN rating', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/agent123/rating')
+        .send({ job_hash: 'job_nan', rating: 'abc' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('integer');
+    });
+
+    it('should reject negative payment_amount', async () => {
+      const app = createApp();
+      const res = await request(app)
+        .post('/agents/agent123/rating')
+        .send({ job_hash: 'job_neg', rating: 25, payment_amount: -100 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('non-negative');
     });
 
     it('should prevent double-rating via nullifier', async () => {
@@ -301,6 +381,31 @@ describe('Agent Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('agents');
     });
+
+    it('should handle NaN service_type gracefully', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?service_type=abc');
+
+      expect(res.status).toBe(200);
+      // NaN service_type treated as undefined — returns all agents
+      expect(res.body).toHaveProperty('agents');
+    });
+
+    it('should handle NaN limit gracefully', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?limit=notanumber');
+
+      expect(res.status).toBe(200);
+      expect(res.body.limit).toBe(20); // defaults to 20
+    });
+
+    it('should clamp negative offset to 0', async () => {
+      const app = createApp();
+      const res = await request(app).get('/agents?offset=-5');
+
+      expect(res.status).toBe(200);
+      expect(res.body.offset).toBe(0);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════
@@ -345,6 +450,56 @@ describe('Agent Routes', () => {
 
       expect(res.status).toBe(404);
       expect(res.body.error).toContain('Agent not found');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Per-Address Rate Limiting (Fixed Window Counter)
+  // ═══════════════════════════════════════════════════════════════════
+
+  describe('Per-address rate limiting', () => {
+    it('should rate limit registration from same address', async () => {
+      const app = createApp();
+      const address = 'aleo1rate_limit_reg_' + Date.now();
+
+      // Default config allows 5 registrations per hour
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app)
+          .post('/agents/register')
+          .send({ service_type: 1, address });
+        expect(res.status).toBe(201);
+      }
+
+      // 6th registration should be rate limited
+      const limitedRes = await request(app)
+        .post('/agents/register')
+        .send({ service_type: 1, address });
+
+      expect(limitedRes.status).toBe(429);
+      expect(limitedRes.body.error).toContain('Too many');
+    });
+
+    it('should rate limit rating submissions from same IP', async () => {
+      const app = createApp();
+
+      // Default config allows 10 ratings per minute per IP.
+      // Previous tests in this file already consumed some of that budget
+      // (since the rate limiter is a module-level singleton).
+      // Keep sending until we hit 429 — it must happen within 15 attempts.
+      let hitLimit = false;
+      for (let i = 0; i < 15; i++) {
+        const res = await request(app)
+          .post(`/agents/agent_rate_many_${Date.now()}_${i}/rating`)
+          .send({ job_hash: `job_many_${i}`, rating: 25 });
+        if (res.status === 429) {
+          expect(res.body.error).toContain('Too many');
+          hitLimit = true;
+          break;
+        }
+        expect(res.status).toBe(201);
+      }
+
+      expect(hitLimit).toBe(true);
     });
   });
 });

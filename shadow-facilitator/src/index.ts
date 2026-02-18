@@ -2,6 +2,7 @@
 // HTTP to Aleo bridge for x402 payments and discovery
 
 import express from 'express';
+import crypto from 'crypto';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -15,7 +16,11 @@ import disputesRouter from './routes/disputes';
 import multisigRouter from './routes/multisig';
 import sessionsRouter from './routes/sessions';
 import { x402Middleware } from './middleware/x402';
+import { createGlobalRateLimiter } from './middleware/rateLimiter';
 import { indexerService } from './services/indexer';
+import { getRedisService } from './services/redis';
+import { config } from './config';
+import { installShutdownHandlers, onShutdown } from './utils/shutdown';
 
 dotenv.config();
 
@@ -63,21 +68,70 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Escrow-Proof', 'X-Job-Hash'],
-  exposedHeaders: ['X-Delivery-Secret', 'X-Job-Id', 'Payment-Required'],
+  exposedHeaders: [
+    'X-Delivery-Secret',
+    'X-Job-Id',
+    'X-Job-Hash',
+    'X-Payment-Required',
+    'X-Payment-Network',
+    'Payment-Required',
+    'X-RateLimit-Limit',
+    'X-RateLimit-Remaining',
+    'X-RateLimit-Reset',
+    'X-Request-ID',
+    'Retry-After',
+  ],
 }));
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+
+// X-Request-ID — attach a unique ID to every request for tracing
+app.use((req, res, next) => {
+  const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  res.setHeader('X-Request-ID', requestId);
+  (req as express.Request & { id?: string }).id = requestId;
+  next();
+});
+
+// Request timeout — 30s default, prevents hanging connections
+const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10);
+app.use((req, res, next) => {
+  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ error: 'Request timeout' });
+    }
+  });
+  next();
+});
+
+// Health endpoint — exempt from rate limiting (used by load balancers / monitoring)
+app.use('/health', healthRouter);
+
+// Global rate limiter (Token Bucket) — applies to all routes below
+app.use(createGlobalRateLimiter({
+  maxRequests: config.rateLimit.global.maxRequests,
+  windowMs: config.rateLimit.global.windowMs,
+  message: 'Too many requests from this IP, please try again later',
+  onLimitReached: (req, res) => {
+    logger.warn(`Global rate limit exceeded for IP ${req.ip}`);
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Please try again later',
+    });
+  },
+}));
 
 // Request logging
 app.use((req, res, next) => {
+  const requestId = (req as express.Request & { id?: string }).id;
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
+    requestId,
     userAgent: req.get('user-agent'),
   });
   next();
 });
 
 // Routes
-app.use('/health', healthRouter);
 app.use('/agents', agentsRouter);
 app.use('/verify', verifyRouter);
 app.use('/refunds', refundsRouter);
@@ -108,8 +162,11 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
+// Install graceful shutdown handlers (SIGTERM, SIGINT)
+installShutdownHandlers();
+
 // Start server
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   logger.info(`ShadowAgent Facilitator running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Network: ${process.env.ALEO_NETWORK || 'testnet'}`);
@@ -132,6 +189,20 @@ app.listen(PORT, async () => {
       logger.info(`Importing ${agentIds.length} initial agents from config...`);
       await indexerService.importAgents(agentIds);
     }
+  }
+});
+
+// Register shutdown cleanup in dependency order (LIFO — last registered runs first)
+onShutdown('HTTP server', () => {
+  return new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+});
+onShutdown('Background indexer', () => indexerService.stopIndexing());
+onShutdown('Redis connection', async () => {
+  const redis = getRedisService();
+  if (redis.isConnected()) {
+    await redis.disconnect();
   }
 });
 

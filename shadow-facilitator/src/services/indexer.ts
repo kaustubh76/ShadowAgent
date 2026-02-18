@@ -1,9 +1,11 @@
 // ShadowAgent Facilitator - Indexer Service
 // Indexes and caches agent listings from on-chain data
+// Supports consistent hashing for multi-instance cache distribution
 
 import { AgentListing, SearchParams, SearchResult } from '../types';
 import { aleoService } from './aleo';
 import { logger } from '../index';
+import { ConsistentHashRing } from '../utils/consistentHash';
 
 // Configuration from environment
 const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || '300000', 10); // 5 minutes default
@@ -30,6 +32,8 @@ export class IndexerService {
   private lastIndexTime: number = 0;
   private indexing: boolean = false;
   private indexInterval: NodeJS.Timeout | null = null;
+  private ring: ConsistentHashRing;
+  private nodeId: string;
   private stats: IndexerStats = {
     cachedAgents: 0,
     trackedAgents: 0,
@@ -39,8 +43,53 @@ export class IndexerService {
     cacheMisses: 0,
   };
 
-  constructor() {
-    // Initialize with empty cache
+  constructor(nodeId?: string, virtualNodes?: number) {
+    this.nodeId = nodeId || process.env.NODE_ID || 'node-0';
+    this.ring = new ConsistentHashRing({
+      virtualNodes: virtualNodes ||
+        parseInt(process.env.CONSISTENT_HASH_VNODES || '150', 10),
+    });
+    this.ring.addNode(this.nodeId);
+  }
+
+  /**
+   * Register a peer facilitator instance for distributed caching.
+   * In multi-instance deployments, each instance registers its peers
+   * so the hash ring knows the full topology.
+   */
+  addPeer(peerId: string): void {
+    this.ring.addNode(peerId);
+    logger?.info(`Added peer ${peerId} to hash ring (${this.ring.getNodeCount()} nodes)`);
+  }
+
+  /**
+   * Remove a peer facilitator instance from the ring.
+   */
+  removePeer(peerId: string): void {
+    this.ring.removeNode(peerId);
+    logger?.info(`Removed peer ${peerId} from hash ring (${this.ring.getNodeCount()} nodes)`);
+  }
+
+  /**
+   * Check if this instance owns the given agent ID based on consistent hashing.
+   * In single-instance mode (default), always returns true.
+   */
+  isOwnedByThisNode(agentId: string): boolean {
+    return this.ring.getNode(agentId) === this.nodeId;
+  }
+
+  /**
+   * Get the node that owns a specific agent ID.
+   */
+  getOwnerNode(agentId: string): string | null {
+    return this.ring.getNode(agentId);
+  }
+
+  /**
+   * Get the consistent hash ring (for stats/debugging).
+   */
+  getHashRing(): ConsistentHashRing {
+    return this.ring;
   }
 
   /**
@@ -90,14 +139,16 @@ export class IndexerService {
     const startTime = Date.now();
 
     try {
-      const agentIdsToCheck = Array.from(this.agentIds);
+      // In multi-instance mode, only index agents owned by this node
+      const agentIdsToCheck = Array.from(this.agentIds)
+        .filter(id => this.isOwnedByThisNode(id));
 
       if (agentIdsToCheck.length === 0) {
-        logger?.debug('No agents to index');
+        logger?.debug('No owned agents to index');
         return;
       }
 
-      logger?.debug(`Indexing ${agentIdsToCheck.length} agents...`);
+      logger?.debug(`Indexing ${agentIdsToCheck.length} owned agents (of ${this.agentIds.size} tracked)...`);
 
       // Fetch listings in batches
       const listings = await aleoService.getAllAgentListings(agentIdsToCheck);
@@ -155,10 +206,16 @@ export class IndexerService {
    */
   cacheAgent(listing: AgentListing): void {
     if (this.cache.size >= MAX_CACHED_AGENTS && !this.cache.has(listing.agent_id)) {
-      // Evict oldest entry
-      const oldestKey = this.findOldestCacheEntry();
-      if (oldestKey) {
-        this.cache.delete(oldestKey);
+      // Prefer evicting entries no longer owned by this node (after topology change)
+      const evictableKey = this.findNonOwnedEntry();
+      if (evictableKey) {
+        this.cache.delete(evictableKey);
+      } else {
+        // Fall back to evicting oldest entry
+        const oldestKey = this.findOldestCacheEntry();
+        if (oldestKey) {
+          this.cache.delete(oldestKey);
+        }
       }
     }
 
@@ -170,6 +227,18 @@ export class IndexerService {
 
     this.stats.cachedAgents = this.cache.size;
     this.stats.trackedAgents = this.agentIds.size;
+  }
+
+  /**
+   * Find a cache entry not owned by this node (for priority eviction after topology change).
+   */
+  private findNonOwnedEntry(): string | null {
+    for (const [key] of this.cache) {
+      if (!this.isOwnedByThisNode(key)) {
+        return key;
+      }
+    }
+    return null;
   }
 
   /**

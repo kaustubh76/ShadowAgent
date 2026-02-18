@@ -1,10 +1,37 @@
 // Session-Based Payments Routes (Phase 5)
 
 import { Router, Request, Response } from 'express';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
 
 const router = Router();
 
-// In-memory store (production: Redis/PostgreSQL)
+// Sliding window size for rate limiting (default 10min = ~100 blocks at 6s/block)
+const RATE_WINDOW_MS = config.rateLimit.session.windowMs;
+
+// Per-session mutex to prevent TOCTOU race on concurrent requests
+const sessionLocks = new Map<string, Promise<void>>();
+
+async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const existing = sessionLocks.get(sessionId);
+  if (existing) await existing;
+
+  let release: () => void;
+  const lock = new Promise<void>(resolve => { release = resolve; });
+  sessionLocks.set(sessionId, lock);
+
+  try {
+    return await fn();
+  } finally {
+    release!();
+    sessionLocks.delete(sessionId);
+  }
+}
+
+// Sessions expire after 7 days; policies after 30 days
+const SESSION_TTL_MS = 7 * 86_400_000;
+const POLICY_TTL_MS = 30 * 86_400_000;
+
 interface SessionRecord {
   session_id: string;
   client: string;
@@ -14,6 +41,7 @@ interface SessionRecord {
   rate_limit: number;
   spent: number;
   request_count: number;
+  prev_window_count: number; // Previous window count for sliding window weighting
   window_start: number;
   valid_until: number;
   duration_blocks: number;
@@ -29,10 +57,10 @@ interface SessionReceiptRecord {
   timestamp: string;
 }
 
-// Rate limit window size in blocks (~10 minutes at 6s/block)
-const RATE_WINDOW_BLOCKS = 100;
-
-const sessionStore = new Map<string, SessionRecord>();
+const sessionStore = new TTLStore<SessionRecord>({
+  maxSize: 50_000,
+  defaultTTLMs: SESSION_TTL_MS,
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // Spending Policies (must be registered BEFORE /:sessionId routes)
@@ -49,7 +77,10 @@ interface PolicyRecord {
   created_at: string;
 }
 
-const policyStore = new Map<string, PolicyRecord>();
+const policyStore = new TTLStore<PolicyRecord>({
+  maxSize: 10_000,
+  defaultTTLMs: POLICY_TTL_MS,
+});
 
 // POST /sessions/policies - Create a spending policy
 router.post('/policies', async (req: Request, res: Response) => {
@@ -93,7 +124,7 @@ router.post('/policies', async (req: Request, res: Response) => {
 router.get('/policies', async (req: Request, res: Response) => {
   const { owner } = req.query;
 
-  let policies = Array.from(policyStore.values());
+  let policies = policyStore.values();
 
   if (owner) {
     policies = policies.filter(p => p.owner === owner);
@@ -166,7 +197,8 @@ router.post('/policies/:policyId/create-session', async (req: Request, res: Resp
       rate_limit,
       spent: 0,
       request_count: 0,
-      window_start: 0,
+      prev_window_count: 0,
+      window_start: Date.now(),
       valid_until: duration_blocks,
       duration_blocks,
       status: 'active',
@@ -224,7 +256,8 @@ router.post('/', async (req: Request, res: Response) => {
       rate_limit,
       spent: 0,
       request_count: 0,
-      window_start: 0,
+      prev_window_count: 0,
+      window_start: Date.now(),
       valid_until: duration_blocks, // Relative duration stored
       duration_blocks,
       status: 'active',
@@ -248,7 +281,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/', async (req: Request, res: Response) => {
   const { client, agent, status } = req.query;
 
-  let sessions = Array.from(sessionStore.values());
+  let sessions = sessionStore.values();
 
   if (client) {
     sessions = sessions.filter(s => s.client === client);
@@ -283,128 +316,166 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
 // POST /sessions/:sessionId/request - Record a session request
 router.post('/:sessionId/request', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const { amount, request_hash } = req.body;
-  const session = sessionStore.get(sessionId);
 
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  await withSessionLock(sessionId, async () => {
+    const { amount, request_hash } = req.body;
+    const session = sessionStore.get(sessionId);
 
-  if (session.status !== 'active') {
-    res.status(400).json({ error: `Session is ${session.status}, not active` });
-    return;
-  }
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  if (!amount || amount <= 0) {
-    res.status(400).json({ error: 'Amount must be positive' });
-    return;
-  }
+    if (session.status !== 'active') {
+      res.status(400).json({ error: `Session is ${session.status}, not active` });
+      return;
+    }
 
-  if (amount > session.max_per_request) {
-    res.status(400).json({
-      error: `Amount ${amount} exceeds per-request limit ${session.max_per_request}`,
+    if (!amount || amount <= 0) {
+      res.status(400).json({ error: 'Amount must be positive' });
+      return;
+    }
+
+    if (amount > session.max_per_request) {
+      res.status(400).json({
+        error: `Amount ${amount} exceeds per-request limit ${session.max_per_request}`,
+      });
+      return;
+    }
+
+    const newSpent = session.spent + amount;
+    if (newSpent > session.max_total) {
+      res.status(400).json({
+        error: `Total spent ${newSpent} would exceed session limit ${session.max_total}`,
+      });
+      return;
+    }
+
+    // ── Sliding Window Counter rate limit ──────────────────────────
+    // Mirrors on-chain RATE_WINDOW_BLOCKS logic with smooth enforcement.
+    // Weights the previous window's count by how much of it overlaps
+    // with the current sliding window, eliminating boundary-burst issues.
+    const now = Date.now();
+    const elapsed = now - session.window_start;
+
+    if (elapsed >= RATE_WINDOW_MS * 2) {
+      // Skipped an entire window — reset completely
+      session.prev_window_count = 0;
+      session.request_count = 0;
+      session.window_start = now;
+    } else if (elapsed >= RATE_WINDOW_MS) {
+      // Rolled into the next window
+      session.prev_window_count = session.request_count;
+      session.request_count = 0;
+      session.window_start = session.window_start + RATE_WINDOW_MS;
+    }
+
+    // Weighted estimate: fraction of previous window still in sliding range
+    const windowElapsed = now - session.window_start;
+    const previousWeight = Math.max(0, 1 - (windowElapsed / RATE_WINDOW_MS));
+    const estimatedCount =
+      session.prev_window_count * previousWeight + session.request_count;
+
+    if (estimatedCount + 1 > session.rate_limit) {
+      const resetAt = session.window_start + RATE_WINDOW_MS;
+      res.status(429).json({
+        error: 'Rate limit exceeded for this session',
+        retryAfter: Math.ceil(Math.max(0, resetAt - now) / 1000),
+        resetAt: new Date(resetAt).toISOString(),
+      });
+      return;
+    }
+
+    session.request_count += 1;
+
+    session.spent = newSpent;
+    session.updated_at = new Date().toISOString();
+
+    const receipt: SessionReceiptRecord = {
+      request_hash: request_hash || `req_${Date.now()}`,
+      amount,
+      timestamp: new Date().toISOString(),
+    };
+    session.receipts.push(receipt);
+
+    res.json({
+      success: true,
+      session,
+      receipt,
     });
-    return;
-  }
-
-  const newSpent = session.spent + amount;
-  if (newSpent > session.max_total) {
-    res.status(400).json({
-      error: `Total spent ${newSpent} would exceed session limit ${session.max_total}`,
-    });
-    return;
-  }
-
-  // Rate limit check (simplified: based on receipt count in current window)
-  session.request_count += 1;
-  if (session.request_count > session.rate_limit) {
-    session.request_count -= 1;
-    res.status(429).json({ error: 'Rate limit exceeded for this session' });
-    return;
-  }
-
-  session.spent = newSpent;
-  session.updated_at = new Date().toISOString();
-
-  const receipt: SessionReceiptRecord = {
-    request_hash: request_hash || `req_${Date.now()}`,
-    amount,
-    timestamp: new Date().toISOString(),
-  };
-  session.receipts.push(receipt);
-
-  res.json({
-    success: true,
-    session,
-    receipt,
   });
 });
 
 // POST /sessions/:sessionId/settle - Settle accumulated payments
 router.post('/:sessionId/settle', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const { settlement_amount } = req.body;
-  const session = sessionStore.get(sessionId);
 
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  await withSessionLock(sessionId, async () => {
+    const { settlement_amount } = req.body;
+    const session = sessionStore.get(sessionId);
 
-  if (session.status === 'closed') {
-    res.status(400).json({ error: 'Cannot settle a closed session' });
-    return;
-  }
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  if (!settlement_amount || settlement_amount <= 0) {
-    res.status(400).json({ error: 'Settlement amount must be positive' });
-    return;
-  }
+    if (session.status === 'closed') {
+      res.status(400).json({ error: 'Cannot settle a closed session' });
+      return;
+    }
 
-  if (settlement_amount > session.spent) {
-    res.status(400).json({
-      error: `Settlement amount ${settlement_amount} exceeds total spent ${session.spent}`,
+    if (!settlement_amount || settlement_amount <= 0) {
+      res.status(400).json({ error: 'Settlement amount must be positive' });
+      return;
+    }
+
+    if (settlement_amount > session.spent) {
+      res.status(400).json({
+        error: `Settlement amount ${settlement_amount} exceeds total spent ${session.spent}`,
+      });
+      return;
+    }
+
+    session.updated_at = new Date().toISOString();
+
+    res.json({
+      success: true,
+      session,
+      settlement: {
+        amount: settlement_amount,
+        settled_at: new Date().toISOString(),
+      },
     });
-    return;
-  }
-
-  session.updated_at = new Date().toISOString();
-
-  res.json({
-    success: true,
-    session,
-    settlement: {
-      amount: settlement_amount,
-      settled_at: new Date().toISOString(),
-    },
   });
 });
 
 // POST /sessions/:sessionId/close - Close session
 router.post('/:sessionId/close', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const session = sessionStore.get(sessionId);
 
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  await withSessionLock(sessionId, async () => {
+    const session = sessionStore.get(sessionId);
 
-  if (session.status === 'closed') {
-    res.status(400).json({ error: 'Session is already closed' });
-    return;
-  }
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  const refundAmount = session.max_total - session.spent;
+    if (session.status === 'closed') {
+      res.status(400).json({ error: 'Session is already closed' });
+      return;
+    }
 
-  session.status = 'closed';
-  session.updated_at = new Date().toISOString();
+    const refundAmount = session.max_total - session.spent;
 
-  res.json({
-    success: true,
-    session,
-    refund_amount: refundAmount,
+    session.status = 'closed';
+    session.updated_at = new Date().toISOString();
+
+    res.json({
+      success: true,
+      session,
+      refund_amount: refundAmount,
+    });
   });
 });
 

@@ -4,6 +4,19 @@ import { Router, Request, Response } from 'express';
 import { aleoService } from '../services/aleo';
 import { EscrowProof, ReputationProof } from '../types';
 
+// Lazy logger — avoids circular dependency during tests
+let _logger: { error: (msg: string, ...a: unknown[]) => void } | null = null;
+function getLogger() {
+  if (_logger) return _logger;
+  try {
+    if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _logger = require('../index').logger;
+    }
+  } catch { /* not available */ }
+  return _logger;
+}
+
 const router = Router();
 
 // POST /verify/escrow - Verify escrow proof
@@ -29,6 +42,7 @@ router.post('/escrow', async (req: Request, res: Response) => {
       verified_at: new Date().toISOString(),
     });
   } catch (error) {
+    (getLogger() || console).error('Escrow verification failed:', error);
     res.status(500).json({
       valid: false,
       error: 'Verification failed',
@@ -65,6 +79,7 @@ router.post('/reputation', async (req: Request, res: Response) => {
       verified_at: new Date().toISOString(),
     });
   } catch (error) {
+    (getLogger() || console).error('Reputation verification failed:', error);
     res.status(500).json({
       valid: false,
       error: 'Verification failed',
@@ -92,6 +107,7 @@ router.post('/nullifier', async (req: Request, res: Response) => {
       checked_at: new Date().toISOString(),
     });
   } catch (error) {
+    (getLogger() || console).error('Nullifier check failed:', error);
     res.status(500).json({ error: 'Check failed' });
   }
 });

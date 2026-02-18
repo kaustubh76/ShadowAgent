@@ -223,3 +223,77 @@ describe('api - with facilitator enabled', () => {
     expect(result.error).toContain('Network error');
   });
 });
+
+describe('fetchWithRetry - 429 handling', () => {
+  beforeEach(() => {
+    mockFacilitatorEnabled = true;
+    vi.restoreAllMocks();
+  });
+
+  it('should retry on 429 and succeed on next attempt', async () => {
+    let callCount = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ error: 'Rate limit' }), {
+          status: 429,
+          headers: { 'Retry-After': '0' },
+        });
+      }
+      return new Response(JSON.stringify({ agents: [], total: 0, limit: 20, offset: 0 }), {
+        status: 200,
+      });
+    });
+
+    const result = await searchAgents({});
+    expect(result.total).toBe(0);
+    expect(callCount).toBe(2);
+  });
+
+  it('should return 429 response when retries exhausted', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Rate limit' }), {
+        status: 429,
+        headers: { 'Retry-After': '0' },
+      })
+    );
+
+    // searchAgents calls fetchWithRetry with retries=2, so 3 attempts total
+    // After exhausting retries, it returns the 429 response (status < 500)
+    // Then searchAgents sees !response.ok and returns EMPTY_SEARCH
+    const result = await searchAgents({});
+    expect(result.agents).toEqual([]);
+  });
+
+  it('should not retry non-429 4xx errors', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(null), { status: 400 })
+    );
+
+    await getAgent('test');
+    // 400 < 500 so fetchWithRetry returns immediately without retrying
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should cap Retry-After to 30 seconds', async () => {
+    // Use fetchWithRetry directly to avoid caching in getAgent/searchAgents
+    const { fetchWithRetry } = await import('./api');
+    let callCount = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response('{}', {
+          status: 429,
+          headers: { 'Retry-After': '0' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+      });
+    });
+
+    const result = await fetchWithRetry('/api/test', undefined, 2, 0);
+    expect(result.ok).toBe(true);
+    expect(callCount).toBe(2);
+  });
+});

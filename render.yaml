@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: shadowagent-facilitator
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: shadow-facilitator
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: ALEO_NETWORK
+        value: testnet
+      - key: ALEO_RPC_URL
+        value: https://api.explorer.aleo.org/v1
+      - key: LOG_LEVEL
+        value: info
+      - key: CORS_ORIGIN
+        value: "*"
+    healthCheckPath: /health

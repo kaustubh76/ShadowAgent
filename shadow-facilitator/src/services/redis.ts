@@ -3,6 +3,19 @@
 
 import Redis from 'ioredis';
 
+// Lazy logger — avoids circular dependency with index.ts during tests
+let _logger: { warn: (msg: string, ...a: unknown[]) => void; error: (msg: string, ...a: unknown[]) => void; info: (msg: string, ...a: unknown[]) => void } | null = null;
+function getLogger() {
+  if (_logger) return _logger;
+  try {
+    if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _logger = require('../index').logger;
+    }
+  } catch { /* not available */ }
+  return _logger;
+}
+
 // Default Redis configuration
 const DEFAULT_REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const DEFAULT_KEY_PREFIX = 'shadowagent:';
@@ -59,11 +72,11 @@ export class RedisService {
 
       this.client.on('connect', () => {
         this.connected = true;
-        console.log('Redis connected');
+        getLogger()?.info('Redis connected');
       });
 
       this.client.on('error', (error) => {
-        console.warn('Redis error:', error.message);
+        (getLogger() || console).warn('Redis error:', error.message);
         this.connected = false;
       });
 
@@ -71,7 +84,7 @@ export class RedisService {
         this.connected = false;
       });
     } catch (error) {
-      console.warn('Redis initialization failed, using in-memory fallback');
+      (getLogger() || console).warn('Redis initialization failed, using in-memory fallback');
       this.client = null;
     }
   }
@@ -87,7 +100,7 @@ export class RedisService {
       this.connected = true;
       return true;
     } catch (error) {
-      console.warn('Redis connection failed:', error);
+      (getLogger() || console).warn('Redis connection failed:', error);
       return false;
     }
   }
@@ -121,7 +134,7 @@ export class RedisService {
       await this.client!.set(key, JSON.stringify(job), 'EX', TTL.PENDING_JOB);
       return true;
     } catch (error) {
-      console.error('Failed to set pending job:', error);
+      (getLogger() || console).error('Failed to set pending job:', error);
       return false;
     }
   }
@@ -137,7 +150,7 @@ export class RedisService {
       const data = await this.client!.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Failed to get pending job:', error);
+      (getLogger() || console).error('Failed to get pending job:', error);
       return null;
     }
   }
@@ -158,7 +171,7 @@ export class RedisService {
       job.status = status;
       return this.setPendingJob(job);
     } catch (error) {
-      console.error('Failed to update job status:', error);
+      (getLogger() || console).error('Failed to update job status:', error);
       return false;
     }
   }
@@ -174,7 +187,60 @@ export class RedisService {
       await this.client!.del(key);
       return true;
     } catch (error) {
-      console.error('Failed to delete pending job:', error);
+      (getLogger() || console).error('Failed to delete pending job:', error);
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // JOB SECRETS (separate from job metadata for security isolation)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Store an HTLC secret for a pending job.
+   * Stored in a separate key from the job itself so it doesn't leak
+   * through debug/listing endpoints.
+   */
+  async setJobSecret(jobHash: string, secret: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+
+    try {
+      const key = this.key('secret', jobHash);
+      await this.client!.set(key, secret, 'EX', TTL.PENDING_JOB);
+      return true;
+    } catch (error) {
+      (getLogger() || console).error('Failed to set job secret:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Retrieve the HTLC secret for a pending job.
+   */
+  async getJobSecret(jobHash: string): Promise<string | null> {
+    if (!this.isConnected()) return null;
+
+    try {
+      const key = this.key('secret', jobHash);
+      return await this.client!.get(key);
+    } catch (error) {
+      (getLogger() || console).error('Failed to get job secret:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete the HTLC secret for a completed job.
+   */
+  async deleteJobSecret(jobHash: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+
+    try {
+      const key = this.key('secret', jobHash);
+      await this.client!.del(key);
+      return true;
+    } catch (error) {
+      (getLogger() || console).error('Failed to delete job secret:', error);
       return false;
     }
   }
@@ -187,22 +253,27 @@ export class RedisService {
 
     try {
       const pattern = this.key('job', '*');
-      const keys = await this.client!.keys(pattern);
-
       const jobs: PendingJob[] = [];
-      for (const key of keys) {
-        const data = await this.client!.get(key);
-        if (data) {
-          const job = JSON.parse(data) as PendingJob;
-          if (job.agentId === agentId && job.status === 'pending') {
-            jobs.push(job);
+      let cursor = '0';
+
+      do {
+        const [nextCursor, keys] = await this.client!.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+
+        for (const key of keys) {
+          const data = await this.client!.get(key);
+          if (data) {
+            const job = JSON.parse(data) as PendingJob;
+            if (job.agentId === agentId && job.status === 'pending') {
+              jobs.push(job);
+            }
           }
         }
-      }
+      } while (cursor !== '0');
 
       return jobs;
     } catch (error) {
-      console.error('Failed to get agent pending jobs:', error);
+      (getLogger() || console).error('Failed to get agent pending jobs:', error);
       return [];
     }
   }
@@ -223,7 +294,7 @@ export class RedisService {
       await this.client!.set(key, JSON.stringify(agent), 'EX', TTL.AGENT_CACHE);
       return true;
     } catch (error) {
-      console.error('Failed to cache agent:', error);
+      (getLogger() || console).error('Failed to cache agent:', error);
       return false;
     }
   }
@@ -239,7 +310,7 @@ export class RedisService {
       const data = await this.client!.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Failed to get cached agent:', error);
+      (getLogger() || console).error('Failed to get cached agent:', error);
       return null;
     }
   }
@@ -255,7 +326,7 @@ export class RedisService {
       await this.client!.del(key);
       return true;
     } catch (error) {
-      console.error('Failed to invalidate agent cache:', error);
+      (getLogger() || console).error('Failed to invalidate agent cache:', error);
       return false;
     }
   }
@@ -275,7 +346,7 @@ export class RedisService {
       await this.client!.set(key, Date.now().toString());
       return true;
     } catch (error) {
-      console.error('Failed to mark nullifier used:', error);
+      (getLogger() || console).error('Failed to mark nullifier used:', error);
       return false;
     }
   }
@@ -291,7 +362,7 @@ export class RedisService {
       const exists = await this.client!.exists(key);
       return exists === 1;
     } catch (error) {
-      console.error('Failed to check nullifier:', error);
+      (getLogger() || console).error('Failed to check nullifier:', error);
       return false;
     }
   }
@@ -323,7 +394,7 @@ export class RedisService {
       await this.client!.set(key, JSON.stringify(data), 'EX', TTL.ESCROW);
       return true;
     } catch (error) {
-      console.error('Failed to set escrow:', error);
+      (getLogger() || console).error('Failed to set escrow:', error);
       return false;
     }
   }
@@ -348,8 +419,78 @@ export class RedisService {
       const data = await this.client!.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Failed to get escrow:', error);
+      (getLogger() || console).error('Failed to get escrow:', error);
       return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // RATE LIMIT STATE (for restart resilience)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Atomically increment a rate limit counter with automatic expiry.
+   * Returns the new counter value, or -1 on failure.
+   */
+  async incrementRateLimit(
+    category: string,
+    key: string,
+    windowMs: number
+  ): Promise<number> {
+    if (!this.isConnected()) return -1;
+
+    try {
+      const redisKey = this.key(`rate:${category}`, key);
+      const count = await this.client!.incr(redisKey);
+
+      // Set expiry on first increment
+      if (count === 1) {
+        const ttlSeconds = Math.ceil(windowMs / 1000) + 60; // Window + 60s buffer
+        await this.client!.expire(redisKey, ttlSeconds);
+      }
+
+      return count;
+    } catch (error) {
+      (getLogger() || console).error('Failed to increment rate limit:', error);
+      return -1;
+    }
+  }
+
+  /**
+   * Get current rate limit counter value.
+   */
+  async getRateLimitCount(
+    category: string,
+    key: string
+  ): Promise<number> {
+    if (!this.isConnected()) return 0;
+
+    try {
+      const redisKey = this.key(`rate:${category}`, key);
+      const count = await this.client!.get(redisKey);
+      return count ? parseInt(count, 10) : 0;
+    } catch (error) {
+      (getLogger() || console).error('Failed to get rate limit count:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Reset a rate limit counter.
+   */
+  async resetRateLimit(
+    category: string,
+    key: string
+  ): Promise<boolean> {
+    if (!this.isConnected()) return false;
+
+    try {
+      const redisKey = this.key(`rate:${category}`, key);
+      await this.client!.del(redisKey);
+      return true;
+    } catch (error) {
+      (getLogger() || console).error('Failed to reset rate limit:', error);
+      return false;
     }
   }
 
@@ -389,15 +530,20 @@ export class RedisService {
 
     try {
       const pattern = `${this.keyPrefix}*`;
-      const keys = await this.client!.keys(pattern);
+      let cursor = '0';
 
-      if (keys.length > 0) {
-        await this.client!.del(...keys);
-      }
+      do {
+        const [nextCursor, keys] = await this.client!.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+          await this.client!.del(...keys);
+        }
+      } while (cursor !== '0');
 
       return true;
     } catch (error) {
-      console.error('Failed to clear all keys:', error);
+      (getLogger() || console).error('Failed to clear all keys:', error);
       return false;
     }
   }

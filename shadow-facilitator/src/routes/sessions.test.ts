@@ -279,6 +279,49 @@ describe('Session Routes', () => {
 
       expect(res.status).toBe(429);
     });
+
+    it('should include retryAfter in rate limit response', async () => {
+      const app = createApp();
+      const sessionId = 'rate_retry_' + Date.now();
+
+      await request(app)
+        .post('/sessions')
+        .send({
+          ...VALID_SESSION,
+          session_id: sessionId,
+          rate_limit: 1,
+          max_per_request: 100_000,
+        });
+
+      // Exhaust the limit
+      await request(app)
+        .post(`/sessions/${sessionId}/request`)
+        .send({ amount: 10_000, request_hash: 'first' });
+
+      // Should get 429 with retryAfter
+      const res = await request(app)
+        .post(`/sessions/${sessionId}/request`)
+        .send({ amount: 10_000, request_hash: 'over' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.retryAfter).toBeDefined();
+      expect(res.body.resetAt).toBeDefined();
+    });
+
+    it('should set window_start on session creation', async () => {
+      const app = createApp();
+      const sessionId = 'window_start_' + Date.now();
+      const before = Date.now();
+
+      await request(app)
+        .post('/sessions')
+        .send({ ...VALID_SESSION, session_id: sessionId });
+
+      const getRes = await request(app).get(`/sessions/${sessionId}`);
+
+      expect(getRes.body.window_start).toBeGreaterThanOrEqual(before);
+      expect(getRes.body.prev_window_count).toBe(0);
+    });
   });
 
   describe('POST /sessions/:sessionId/settle', () => {
@@ -675,6 +718,74 @@ describe('Session Routes', () => {
         });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('Concurrency (withSessionLock)', () => {
+    it('should prevent concurrent overspend — only one of two exceeding requests succeeds', async () => {
+      const app = createApp();
+      const sessionId = 'concurrent_spend_' + Date.now();
+
+      // Create a session with 1000 budget
+      await request(app)
+        .post('/sessions')
+        .send({
+          ...VALID_SESSION,
+          session_id: sessionId,
+          max_total: 1_000,
+          max_per_request: 600,
+          rate_limit: 100,
+        });
+
+      // Fire two 600-credit requests concurrently (total 1200 > 1000 limit)
+      const [r1, r2] = await Promise.all([
+        request(app).post(`/sessions/${sessionId}/request`).send({ amount: 600 }),
+        request(app).post(`/sessions/${sessionId}/request`).send({ amount: 600 }),
+      ]);
+
+      const statuses = [r1.status, r2.status].sort();
+      // Exactly one should succeed (200), one should fail (400)
+      expect(statuses).toEqual([200, 400]);
+
+      // Verify total spent is exactly 600, not 1200
+      const getRes = await request(app).get(`/sessions/${sessionId}`);
+      expect(getRes.body.spent).toBe(600);
+    });
+
+    it('should not block different sessions from each other', async () => {
+      const app = createApp();
+      const id1 = 'no_block_1_' + Date.now();
+      const id2 = 'no_block_2_' + Date.now();
+
+      await request(app).post('/sessions').send({ ...VALID_SESSION, session_id: id1 });
+      await request(app).post('/sessions').send({ ...VALID_SESSION, session_id: id2 });
+
+      // Both should succeed in parallel
+      const [r1, r2] = await Promise.all([
+        request(app).post(`/sessions/${id1}/request`).send({ amount: 100_000 }),
+        request(app).post(`/sessions/${id2}/request`).send({ amount: 100_000 }),
+      ]);
+
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(200);
+    });
+
+    it('should serialize settle and close on same session', async () => {
+      const app = createApp();
+      const sessionId = 'serial_close_' + Date.now();
+
+      await request(app).post('/sessions').send({ ...VALID_SESSION, session_id: sessionId });
+      await request(app).post(`/sessions/${sessionId}/request`).send({ amount: 200_000 });
+
+      // Settle and close concurrently
+      const [settleRes, closeRes] = await Promise.all([
+        request(app).post(`/sessions/${sessionId}/settle`).send({ settlement_amount: 200_000 }),
+        request(app).post(`/sessions/${sessionId}/close`),
+      ]);
+
+      // Both should complete without error (order may vary)
+      const succeeded = [settleRes, closeRes].filter(r => r.status === 200);
+      expect(succeeded.length).toBe(2);
     });
   });
 
