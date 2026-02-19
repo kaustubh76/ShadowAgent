@@ -18,7 +18,7 @@ import {
   formatU64ForLeo,
 } from '../../services/aleo';
 import { getServiceTypeName } from '../../stores/agentStore';
-import { FACILITATOR_URL, FACILITATOR_ENABLED } from '../../config';
+import { API_BASE, FACILITATOR_ENABLED } from '../../config';
 
 interface RegistrationFormProps {
   onRegistered: () => void;
@@ -157,7 +157,7 @@ export default function RegistrationForm({ onRegistered }: RegistrationFormProps
 
         // Notify facilitator (non-blocking)
         if (FACILITATOR_ENABLED) {
-          fetch(`${FACILITATOR_URL}/agents/register`, {
+          fetch(`${API_BASE}/agents/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

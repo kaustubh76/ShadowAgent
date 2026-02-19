@@ -211,6 +211,8 @@ export async function getAgent(agentId: string): Promise<AgentListing | null> {
 
 // Verify a reputation proof - uses SDK client if available
 export async function verifyReputationProof(proof: ReputationProofInput): Promise<VerificationResult> {
+  if (!FACILITATOR_ENABLED) return { valid: false, error: 'Facilitator not available' };
+
   const client = getClient();
 
   if (client) {

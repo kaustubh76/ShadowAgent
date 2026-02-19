@@ -190,6 +190,27 @@ const server = app.listen(PORT, async () => {
       await indexerService.importAgents(agentIds);
     }
   }
+
+  // Seed known agents directly into cache (bypasses on-chain BHP256 hash lookup)
+  // Format: address:service_type (e.g., "aleo1abc...:1,aleo1def...:3")
+  const seedAgents = process.env.SEED_AGENTS;
+  if (seedAgents) {
+    const entries = seedAgents.split(',').map(e => e.trim()).filter(Boolean);
+    for (const entry of entries) {
+      const [address, serviceTypeStr] = entry.split(':');
+      if (address) {
+        indexerService.cacheAgent({
+          agent_id: address.trim(),
+          service_type: parseInt(serviceTypeStr || '1', 10),
+          endpoint_hash: '',
+          tier: 0 as import('./types').Tier,
+          is_active: true,
+          registered_at: Date.now(),
+        }, true);
+        logger.info(`Seeded agent: ${address.trim()}`);
+      }
+    }
+  }
 });
 
 // Register shutdown cleanup in dependency order (LIFO — last registered runs first)

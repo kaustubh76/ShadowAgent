@@ -29,6 +29,7 @@ interface IndexerStats {
 export class IndexerService {
   private cache: Map<string, CacheEntry> = new Map();
   private agentIds: Set<string> = new Set();
+  private pinnedAgents: Set<string> = new Set(); // Seeded agents immune to indexer eviction
   private lastIndexTime: number = 0;
   private indexing: boolean = false;
   private indexInterval: NodeJS.Timeout | null = null;
@@ -160,9 +161,9 @@ export class IndexerService {
         fetchedIds.add(listing.agent_id);
       }
 
-      // Remove agents that no longer exist on-chain
+      // Remove agents that no longer exist on-chain (skip pinned/seeded agents)
       for (const agentId of agentIdsToCheck) {
-        if (!fetchedIds.has(agentId)) {
+        if (!fetchedIds.has(agentId) && !this.pinnedAgents.has(agentId)) {
           this.cache.delete(agentId);
           this.agentIds.delete(agentId);
         }
@@ -204,7 +205,7 @@ export class IndexerService {
   /**
    * Cache an agent listing
    */
-  cacheAgent(listing: AgentListing): void {
+  cacheAgent(listing: AgentListing, pinned = false): void {
     if (this.cache.size >= MAX_CACHED_AGENTS && !this.cache.has(listing.agent_id)) {
       // Prefer evicting entries no longer owned by this node (after topology change)
       const evictableKey = this.findNonOwnedEntry();
@@ -224,6 +225,10 @@ export class IndexerService {
       timestamp: Date.now(),
     });
     this.agentIds.add(listing.agent_id);
+
+    if (pinned) {
+      this.pinnedAgents.add(listing.agent_id);
+    }
 
     this.stats.cachedAgents = this.cache.size;
     this.stats.trackedAgents = this.agentIds.size;
@@ -264,9 +269,9 @@ export class IndexerService {
   async getAgent(agentId: string): Promise<AgentListing | null> {
     this.stats.totalFetches++;
 
-    // Check cache first
+    // Check cache first (pinned agents are always considered fresh)
     const cached = this.cache.get(agentId);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    if (cached && (this.pinnedAgents.has(agentId) || Date.now() - cached.timestamp < CACHE_TTL_MS)) {
       this.stats.cacheHits++;
       return cached.data;
     }
@@ -353,8 +358,8 @@ export class IndexerService {
     const agents: AgentListing[] = [];
     const staleThreshold = CACHE_TTL_MS * 2; // Allow slightly stale entries for search
 
-    for (const [, entry] of this.cache.entries()) {
-      if (now - entry.timestamp < staleThreshold) {
+    for (const [key, entry] of this.cache.entries()) {
+      if (this.pinnedAgents.has(key) || now - entry.timestamp < staleThreshold) {
         agents.push(entry.data);
       }
     }

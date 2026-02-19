@@ -2,7 +2,7 @@
 // Uses lazy import to avoid blocking React mount with WASM loading
 
 import { create } from 'zustand';
-import { FACILITATOR_URL as DEFAULT_FACILITATOR_URL } from '../config';
+import { API_BASE } from '../config';
 
 interface HealthStatus {
   status: string;
@@ -44,7 +44,7 @@ export const useSDKStore = create<SDKState>((set, get) => ({
       const { ShadowAgentClient } = await import('@shadowagent/sdk');
       const client = new ShadowAgentClient({
         network: 'testnet',
-        facilitatorUrl: DEFAULT_FACILITATOR_URL,
+        facilitatorUrl: API_BASE,
         timeout: 30000,
         ...config,
       });

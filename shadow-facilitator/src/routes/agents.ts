@@ -110,7 +110,19 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
 
     const agentId = address || `agent_${Date.now()}`;
 
-    await indexerService.onAgentRegistered(agentId);
+    // Cache the listing directly from request data (on-chain agent_listings mapping
+    // uses BHP256 hash as key, which we can't derive here, so construct from body)
+    indexerService.cacheAgent({
+      agent_id: agentId,
+      service_type: parsedType || ServiceType.NLP,
+      endpoint_hash: req.body.endpoint_url || '',
+      tier: Tier.New,
+      is_active: true,
+      registered_at: Date.now(),
+    });
+
+    // Also attempt on-chain fetch in background (may enrich data if key matches)
+    indexerService.onAgentRegistered(agentId).catch(() => {});
 
     res.status(201).json({
       success: true,
@@ -156,7 +168,17 @@ router.get('/by-address/:publicKey', async (req: Request, res: Response) => {
     const cached = allAgents.find(a => a.agent_id === publicKey);
 
     if (cached) {
-      res.json(cached);
+      // Enrich with reputation fields expected by frontend
+      const ratings = ratingStore.get(publicKey) || [];
+      const totalJobs = ratings.length;
+      const totalRatingPoints = ratings.reduce((sum, r) => sum + r.rating, 0);
+      const totalRevenue = ratings.reduce((sum, r) => sum + r.payment_amount, 0);
+      res.json({
+        ...cached,
+        total_jobs: totalJobs,
+        total_rating_points: totalRatingPoints,
+        total_revenue: totalRevenue,
+      });
       return;
     }
 

@@ -358,7 +358,28 @@ describe('ShadowAgentServer', () => {
 
       expect(proof).not.toBeNull();
       expect(proof?.proof_type).toBe(ProofType.Tier);
+      expect(proof?.threshold_met).toBe(true);
       expect(proof?.tier_proven).toBe(Tier.Silver);
+    });
+
+    it('should return threshold_met false when tier is below threshold', async () => {
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+      agent.setReputation({
+        owner: 'aleo1owner',
+        agent_id: 'agent123',
+        total_jobs: 10,
+        total_rating_points: 40,
+        total_revenue: 100000,
+        tier: Tier.Bronze,
+        created_at: 1000,
+        last_updated: 2000,
+      });
+
+      const proof = await agent.proveReputation(ProofType.Tier, Tier.Gold);
+
+      expect(proof).not.toBeNull();
+      expect(proof?.threshold_met).toBe(false);
+      expect(proof?.tier_proven).toBe(Tier.Bronze);
     });
   });
 
