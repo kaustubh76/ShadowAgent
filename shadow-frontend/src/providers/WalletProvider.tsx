@@ -71,7 +71,8 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     storeDisconnect();
   }, [storeDisconnect]);
 
-  // Sign and submit a transaction using the SDK directly
+  // Sign and submit a transaction using manual authorization building
+  // This bypasses the SDK's broken base fee floor in programManager.execute()
   const signTransaction = useCallback(async (
     programId: string,
     functionName: string,
@@ -82,6 +83,7 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
 
     const {
       Account,
+      PrivateKey: PrivateKeyClass,
       ProgramManager,
       AleoNetworkClient,
       AleoKeyProvider,
@@ -89,7 +91,7 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     } = await import('@provablehq/sdk');
 
     const account = new Account({ privateKey });
-    // Base URL without /testnet — the SDK appends the network path internally
+    const privKey = PrivateKeyClass.from_string(privateKey);
     const rpcUrl = 'https://api.explorer.provable.com/v1';
 
     const networkClient = new AleoNetworkClient(rpcUrl);
@@ -100,15 +102,39 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     const programManager = new ProgramManager(rpcUrl, keyProvider, recordProvider);
     programManager.setAccount(account);
 
-    const txResult = await programManager.execute({
+    // Step 1: Build authorization
+    const authorization = await programManager.buildAuthorization({
       programName: programId,
       functionName,
+      privateKey: privKey,
       inputs,
-      priorityFee: fee,
-      privateFee: false,
     });
 
-    return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
+    // Step 2: Get execution ID and estimate fee
+    const executionId = authorization.toExecutionId().toString();
+    const baseFeeMicrocredits = await programManager.estimateFeeForAuthorization({
+      authorization,
+      programName: programId,
+    });
+    const baseFeeCredits = Number(baseFeeMicrocredits) / 1_000_000;
+
+    // Step 3: Build fee authorization with real estimated fee
+    const feeAuthorization = await programManager.buildFeeAuthorization({
+      deploymentOrExecutionId: executionId,
+      baseFeeCredits,
+      priorityFeeCredits: fee / 1_000_000,
+      privateKey: privKey,
+    });
+
+    // Step 4: Build and submit transaction
+    const tx = await programManager.buildTransactionFromAuthorization({
+      programName: programId,
+      authorization,
+      feeAuthorization,
+    });
+
+    const txId = await networkClient.submitTransaction(tx.toString());
+    return typeof txId === 'string' ? txId : tx.id();
   }, [privateKey]);
 
   // Fetch records for a program via RPC
