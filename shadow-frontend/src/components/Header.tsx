@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, User, Users, Menu, X, AlertTriangle } from 'lucide-react';
+import { Shield, User, Users, Menu, X, AlertTriangle, Clock } from 'lucide-react';
 import ConnectWallet from './ConnectWallet';
 import clsx from 'clsx';
 
@@ -14,6 +14,7 @@ export default function Header() {
     { path: '/client', label: 'Find Agents', icon: Users },
     { path: '/agent', label: 'Agent Dashboard', icon: User },
     { path: '/disputes', label: 'Disputes', icon: AlertTriangle },
+    { path: '/activity', label: 'Activity', icon: Clock },
   ];
 
   // Close mobile menu on route change

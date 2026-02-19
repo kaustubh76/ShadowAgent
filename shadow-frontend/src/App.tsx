@@ -11,6 +11,7 @@ const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const ClientDashboard = lazy(() => import('./pages/ClientDashboard'));
 const AgentDetails = lazy(() => import('./pages/AgentDetails'));
 const DisputeCenter = lazy(() => import('./pages/DisputeCenter'));
+const TransactionHistory = lazy(() => import('./pages/TransactionHistory'));
 
 // 404 Page
 function NotFound() {
@@ -133,6 +134,7 @@ function App() {
               <Route path="client" element={<ClientDashboard />} />
               <Route path="agents/:agentId" element={<AgentDetails />} />
               <Route path="disputes" element={<DisputeCenter />} />
+              <Route path="activity" element={<TransactionHistory />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
