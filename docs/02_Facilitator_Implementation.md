@@ -25,7 +25,7 @@ npx tsc --init
 
 # Install dependencies
 npm install express cors helmet dotenv winston
-npm install @aleohq/sdk axios
+npm install @provablehq/sdk axios
 npm install --save-dev @types/express @types/cors
 ```
 
@@ -34,25 +34,31 @@ npm install --save-dev @types/express @types/cors
 ```
 shadow-facilitator/
 ├── src/
-│   ├── index.ts              # Entry point
+│   ├── index.ts              # Entry point + route registration
 │   ├── config/
-│   │   └── index.ts          # Configuration
+│   │   └── index.ts          # Configuration (port, rate limits, consistent hash)
 │   ├── routes/
-│   │   ├── agents.ts         # Discovery endpoints
-│   │   ├── verify.ts         # Proof verification
-│   │   └── health.ts         # Health checks
+│   │   ├── agents.ts         # Agent discovery endpoints
+│   │   ├── verify.ts         # Proof verification endpoints
+│   │   ├── health.ts         # Health check endpoints
+│   │   ├── disputes.ts       # Dispute resolution endpoints (Phase 10a)
+│   │   ├── refunds.ts        # Partial refund endpoints (Phase 10a)
+│   │   ├── multisig.ts       # Multi-sig escrow endpoints (Phase 10a)
+│   │   └── sessions.ts       # Session-based payment endpoints (Phase 5)
 │   ├── services/
 │   │   ├── aleo.ts           # Aleo SDK wrapper
-│   │   ├── indexer.ts        # Agent listing indexer
-│   │   └── cache.ts          # Redis/memory cache
+│   │   ├── indexer.ts        # Agent listing indexer + cache
+│   │   └── redis.ts          # Redis service (optional, for caching/rate limiting)
 │   ├── middleware/
 │   │   ├── x402.ts           # x402 protocol handler
-│   │   ├── auth.ts           # API authentication
-│   │   └── rateLimit.ts      # Rate limiting
-│   ├── types/
-│   │   └── index.ts          # TypeScript types
+│   │   └── rateLimiter.ts    # Rate limiting (Token Bucket, Sliding Window, Fixed Window)
+│   ├── types.ts              # TypeScript type definitions
+│   ├── test-setup.ts         # Test environment setup
 │   └── utils/
-│       └── logger.ts         # Logging utility
+│       ├── ttlStore.ts       # Time-to-live in-memory store
+│       ├── consistentHash.ts # Consistent hashing for distributed lookups
+│       ├── resilience.ts     # Circuit breaker / retry utilities
+│       └── shutdown.ts       # Graceful shutdown handlers (SIGTERM/SIGINT)
 ├── tests/
 ├── package.json
 ├── tsconfig.json
@@ -94,7 +100,7 @@ shadow-facilitator/
 ```bash
 # .env.example
 NODE_ENV=development
-PORT=3000
+PORT=3001
 
 # Aleo Network
 ALEO_NETWORK=testnet
@@ -107,9 +113,28 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/shadowagent
 # Redis (optional, for caching)
 REDIS_URL=redis://localhost:6379
 
-# Rate Limiting
-RATE_LIMIT_WINDOW_MS=60000
-RATE_LIMIT_MAX_REQUESTS=100
+# Rate Limiting — Global (Token Bucket, per IP)
+RATE_LIMIT_GLOBAL_WINDOW_MS=60000
+RATE_LIMIT_GLOBAL_MAX=100
+
+# Rate Limiting — Per-Address Operations (Fixed Window)
+RATE_LIMIT_REGISTER_WINDOW_MS=3600000
+RATE_LIMIT_REGISTER_MAX=5
+RATE_LIMIT_RATING_WINDOW_MS=60000
+RATE_LIMIT_RATING_MAX=10
+RATE_LIMIT_DISPUTE_WINDOW_MS=3600000
+RATE_LIMIT_DISPUTE_MAX=3
+RATE_LIMIT_REFUND_WINDOW_MS=3600000
+RATE_LIMIT_REFUND_MAX=5
+RATE_LIMIT_MULTISIG_WINDOW_MS=60000
+RATE_LIMIT_MULTISIG_MAX=10
+
+# Rate Limiting — Session (Sliding Window Counter)
+RATE_LIMIT_SESSION_WINDOW_MS=600000
+
+# Rate Limiting — x402 (Token Bucket, per IP)
+RATE_LIMIT_X402_WINDOW_MS=60000
+RATE_LIMIT_X402_MAX=20
 
 # Logging
 LOG_LEVEL=info
@@ -125,26 +150,57 @@ dotenv.config();
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '3001', 10),
 
   aleo: {
     network: process.env.ALEO_NETWORK || 'testnet',
     rpcUrl: process.env.ALEO_RPC_URL || 'https://api.explorer.aleo.org/v1',
-    privateKey: process.env.ALEO_PRIVATE_KEY || '',
     programId: 'shadow_agent.aleo',
   },
 
-  database: {
-    url: process.env.DATABASE_URL,
-  },
-
-  redis: {
-    url: process.env.REDIS_URL,
-  },
-
   rateLimit: {
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+    // Global HTTP rate limiting (Token Bucket) — per IP
+    global: {
+      windowMs: parseInt(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || '60000', 10),
+      maxRequests: parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || '100', 10),
+    },
+    // Session-based rate limiting (Sliding Window Counter) — per session
+    session: {
+      windowMs: parseInt(process.env.RATE_LIMIT_SESSION_WINDOW_MS || '600000', 10),
+    },
+    // Per-address operations (Fixed Window Counter)
+    perAddress: {
+      registration: {
+        windowMs: parseInt(process.env.RATE_LIMIT_REGISTER_WINDOW_MS || '3600000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_REGISTER_MAX || '5', 10),
+      },
+      rating: {
+        windowMs: parseInt(process.env.RATE_LIMIT_RATING_WINDOW_MS || '60000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_RATING_MAX || '10', 10),
+      },
+      dispute: {
+        windowMs: parseInt(process.env.RATE_LIMIT_DISPUTE_WINDOW_MS || '3600000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_DISPUTE_MAX || '3', 10),
+      },
+      refund: {
+        windowMs: parseInt(process.env.RATE_LIMIT_REFUND_WINDOW_MS || '3600000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_REFUND_MAX || '5', 10),
+      },
+      multisig: {
+        windowMs: parseInt(process.env.RATE_LIMIT_MULTISIG_WINDOW_MS || '60000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_MULTISIG_MAX || '10', 10),
+      },
+    },
+    // x402 payment rate limiting (Token Bucket) — per IP
+    x402: {
+      windowMs: parseInt(process.env.RATE_LIMIT_X402_WINDOW_MS || '60000', 10),
+      maxRequests: parseInt(process.env.RATE_LIMIT_X402_MAX || '20', 10),
+    },
+  },
+
+  consistentHash: {
+    virtualNodes: parseInt(process.env.CONSISTENT_HASH_VNODES || '150', 10),
+    replicationFactor: parseInt(process.env.CONSISTENT_HASH_REPLICATION || '1', 10),
   },
 
   logging: {
@@ -152,10 +208,9 @@ export const config = {
   },
 };
 
-// Validate required config
 export function validateConfig(): void {
-  if (!config.aleo.privateKey && config.env === 'production') {
-    throw new Error('ALEO_PRIVATE_KEY is required in production');
+  if (!config.aleo.rpcUrl) {
+    throw new Error('ALEO_RPC_URL is required');
   }
 }
 ```
@@ -239,7 +294,7 @@ export interface VerifyResponse {
 
 ```typescript
 // src/services/aleo.ts
-import { Account, ProgramManager, AleoNetworkClient } from '@aleohq/sdk';
+import { Account, ProgramManager, AleoNetworkClient } from '@provablehq/sdk';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { PublicListing, EscrowProof, ReputationProof } from '../types';
@@ -740,6 +795,185 @@ router.get('/ready', async (req: Request, res: Response) => {
 export default router;
 ```
 
+### 6.4 Dispute Routes (Phase 10a)
+
+```typescript
+// src/routes/disputes.ts
+import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
+
+const router = Router();
+
+// Per-address rate limiting: 3 disputes per hour
+const disputeLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.dispute,
+  keyExtractor: (req) => req.body?.client || req.body?.agent || req.ip || 'unknown',
+});
+
+interface DisputeRecord {
+  client: string;
+  agent: string;
+  job_hash: string;
+  escrow_amount: number;
+  client_evidence_hash: string;
+  agent_evidence_hash: string;
+  status: 'opened' | 'agent_responded' | 'resolved_client' | 'resolved_agent' | 'resolved_split';
+  resolution_agent_pct: number;
+  opened_at: string;
+  responded_at?: string;
+  resolved_at?: string;
+}
+
+// Disputes expire after 90 days
+const disputeStore = new TTLStore<DisputeRecord>({ maxSize: 50_000, defaultTTLMs: 90 * 86_400_000 });
+
+// POST /disputes          — Open a dispute
+// GET  /disputes/:jobHash — Get dispute by job hash
+// GET  /disputes          — List disputes (filter: client, agent, status)
+// POST /disputes/:jobHash/respond — Agent responds with counter-evidence
+// POST /disputes/:jobHash/resolve — Admin resolves with percentage split or winner
+
+export default router;
+```
+
+### 6.5 Refund Routes (Phase 10a)
+
+```typescript
+// src/routes/refunds.ts
+import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
+
+const router = Router();
+
+// Per-address rate limiting: 5 refund proposals per hour
+const refundLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.refund,
+  keyExtractor: (req) => req.body?.agent || req.body?.client || req.ip || 'unknown',
+});
+
+interface RefundProposal {
+  agent: string;
+  client: string;
+  total_amount: number;
+  agent_amount: number;
+  client_amount: number;
+  job_hash: string;
+  status: 'proposed' | 'accepted' | 'rejected';
+  created_at: string;
+  updated_at: string;
+}
+
+// Refund proposals expire after 30 days
+const refundStore = new TTLStore<RefundProposal>({ maxSize: 50_000, defaultTTLMs: 30 * 86_400_000 });
+
+// POST /refunds              — Propose a partial refund (validates agent_amount <= total_amount)
+// GET  /refunds/:jobHash     — Get refund proposal by job hash
+// GET  /refunds              — List refunds (filter: client, agent, status)
+// POST /refunds/:jobHash/accept  — Agent accepts refund proposal
+// POST /refunds/:jobHash/reject  — Agent rejects refund proposal
+
+export default router;
+```
+
+### 6.6 Multi-Sig Escrow Routes (Phase 10a)
+
+```typescript
+// src/routes/multisig.ts
+import { Router, Request, Response } from 'express';
+import { createAddressRateLimiter } from '../middleware/rateLimiter';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
+
+const router = Router();
+
+// Per-address rate limiting: 10 multisig operations per minute
+const multisigLimiter = createAddressRateLimiter({
+  ...config.rateLimit.perAddress.multisig,
+  keyExtractor: (req) => req.body?.owner || req.body?.signer_address || req.ip || 'unknown',
+});
+
+interface MultiSigEscrowRecord {
+  owner: string;
+  agent: string;
+  amount: number;
+  job_hash: string;
+  deadline: number;
+  secret_hash: string;
+  signers: [string, string, string];
+  required_sigs: number;
+  sig_count: number;
+  approvals: [boolean, boolean, boolean];
+  status: 'locked' | 'released' | 'refunded';
+  created_at: string;
+  updated_at: string;
+}
+
+// Escrows expire after 30 days; per-job mutex prevents TOCTOU race on concurrent approvals
+const multisigStore = new TTLStore<MultiSigEscrowRecord>({ maxSize: 50_000, defaultTTLMs: 30 * 86_400_000 });
+
+// POST /escrows/multisig                      — Create multi-sig escrow (3 signers, M-of-3)
+// GET  /escrows/multisig/pending/:address      — Get pending escrows for signer
+// GET  /escrows/multisig/:jobHash              — Get escrow by job hash
+// POST /escrows/multisig/:jobHash/approve      — Approve escrow release (mutex-protected)
+
+export default router;
+```
+
+### 6.7 Session Routes (Phase 5)
+
+```typescript
+// src/routes/sessions.ts
+import { Router, Request, Response } from 'express';
+import { config } from '../config';
+import { TTLStore } from '../utils/ttlStore';
+
+const router = Router();
+
+// Per-session mutex to prevent TOCTOU race on concurrent requests
+const sessionLocks = new Map<string, Promise<void>>();
+
+// Sessions expire after 7 days; policies after 30 days
+const SESSION_TTL_MS = 7 * 86_400_000;
+const POLICY_TTL_MS  = 30 * 86_400_000;
+
+const sessionStore = new TTLStore<SessionRecord>({ maxSize: 100_000, defaultTTLMs: SESSION_TTL_MS });
+const policyStore  = new TTLStore<PolicyRecord>({ maxSize: 50_000, defaultTTLMs: POLICY_TTL_MS });
+
+// ── Policy endpoints ──
+// POST /sessions/policies                          — Create a spending policy
+// GET  /sessions/policies                          — List policies for an owner
+// GET  /sessions/policies/:policyId                — Get specific policy
+// POST /sessions/policies/:policyId/create-session — Create session from policy
+
+// ── Session endpoints ──
+// POST /sessions                    — Create a new session directly
+// GET  /sessions                    — List sessions (filter: client, agent, status)
+// GET  /sessions/:sessionId         — Get session details
+// POST /sessions/:sessionId/request — Process a session request (mutex-protected, sliding window rate limit)
+// POST /sessions/:sessionId/settle  — Settle accumulated receipts
+// POST /sessions/:sessionId/close   — Close a session
+// POST /sessions/:sessionId/pause   — Pause a session
+// POST /sessions/:sessionId/resume  — Resume a paused session
+
+// IMPORTANT: Static path `/policies` is registered BEFORE parameterized `/:sessionId`
+// to prevent Express from matching "policies" as a session ID.
+
+export default router;
+```
+
+### 6.8 Utility Modules
+
+| Module | Purpose |
+|--------|---------|
+| `utils/ttlStore.ts` | Generic in-memory key-value store with configurable TTL and max size. Used by disputes (90d), refunds (30d), multisig (30d), and sessions (7d). |
+| `utils/consistentHash.ts` | Consistent hashing ring for distributed agent lookups. Configurable virtual nodes (default 150) and replication factor. |
+| `utils/resilience.ts` | Circuit breaker and retry utilities for external service calls (Aleo RPC, Redis). |
+| `utils/shutdown.ts` | Graceful shutdown handler supporting SIGTERM/SIGINT with ordered cleanup (LIFO registration order). |
+
 ---
 
 ## 7. x402 Middleware
@@ -819,6 +1053,27 @@ export function x402Middleware(options: X402Options) {
 
 ---
 
+## 7.5 Rate Limiting Strategies
+
+The facilitator uses three distinct rate limiting strategies implemented in `src/middleware/rateLimiter.ts`:
+
+| Strategy | Algorithm | Scope | Use Case |
+|----------|-----------|-------|----------|
+| **Token Bucket** | `TokenBucketLimiter` | Per IP (global) | Global HTTP rate limiting — allows bursts up to bucket size |
+| **Sliding Window Counter** | `SlidingWindowCounterLimiter` | Per session | Session request rate limiting — smooth enforcement, matches on-chain block windows (~100 blocks = 10min) |
+| **Fixed Window Counter** | `FixedWindowCounterLimiter` | Per address | Per-operation limits (registration: 5/hr, rating: 10/min, dispute: 3/hr, refund: 5/hr, multisig: 10/min) |
+
+There is also a **Redis-backed Fixed Window** (`RedisBackedFixedWindowLimiter`) that persists counts across server restarts, falling back to in-memory when Redis is unavailable.
+
+**Exported factory functions:**
+- `createGlobalRateLimiter(opts)` — Token Bucket middleware applied before all routes (except `/health`)
+- `createAddressRateLimiter(opts)` — Fixed Window middleware with configurable `keyExtractor` for per-route use
+- `createSessionRateLimiter(opts)` — Sliding Window middleware for session routes
+
+All limiters set standard response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`.
+
+---
+
 ## 8. Logger Utility
 
 ```typescript
@@ -862,65 +1117,104 @@ if (config.env === 'production') {
 ```typescript
 // src/index.ts
 import express from 'express';
+import crypto from 'crypto';
 import cors from 'cors';
 import helmet from 'helmet';
-import { config, validateConfig } from './config';
-import { aleoService } from './services/aleo';
-import { indexerService } from './services/indexer';
-import { logger } from './utils/logger';
+import dotenv from 'dotenv';
+import { createLogger, format, transports } from 'winston';
+
 import agentsRouter from './routes/agents';
 import verifyRouter from './routes/verify';
 import healthRouter from './routes/health';
+import refundsRouter from './routes/refunds';
+import disputesRouter from './routes/disputes';
+import multisigRouter from './routes/multisig';
+import sessionsRouter from './routes/sessions';
+import { x402Middleware } from './middleware/x402';
+import { createGlobalRateLimiter } from './middleware/rateLimiter';
+import { indexerService } from './services/indexer';
+import { getRedisService } from './services/redis';
+import { config } from './config';
+import { installShutdownHandlers, onShutdown } from './utils/shutdown';
 
-async function main() {
-  // Validate configuration
-  validateConfig();
+dotenv.config();
 
-  // Initialize services
-  await aleoService.initialize();
-  indexerService.start();
+const app = express();
+const PORT = process.env.PORT || 3001;
 
-  // Create Express app
-  const app = express();
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Escrow-Proof', 'X-Job-Hash'],
+}));
+app.use(express.json({ limit: '100kb' }));
 
-  // Middleware
-  app.use(helmet());
-  app.use(cors());
-  app.use(express.json());
+// X-Request-ID — attach a unique ID to every request for tracing
+app.use((req, res, next) => {
+  const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  res.setHeader('X-Request-ID', requestId);
+  next();
+});
 
-  // Request logging
-  app.use((req, res, next) => {
-    logger.debug('Request', {
-      method: req.method,
-      path: req.path,
-      query: req.query,
-    });
-    next();
+// Request timeout — 30s default, prevents hanging connections
+const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10);
+app.use((req, res, next) => {
+  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ error: 'Request timeout' });
+    }
   });
+  next();
+});
 
-  // Routes
-  app.use('/health', healthRouter);
-  app.use('/agents', agentsRouter);
-  app.use('/verify', verifyRouter);
+// Health endpoint — exempt from rate limiting (used by load balancers / monitoring)
+app.use('/health', healthRouter);
 
-  // Error handler
-  app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    logger.error('Unhandled error', { error: err.message, stack: err.stack });
-    res.status(500).json({ error: 'Internal server error' });
+// Global rate limiter (Token Bucket) — applies to all routes below
+app.use(createGlobalRateLimiter({
+  maxRequests: config.rateLimit.global.maxRequests,
+  windowMs: config.rateLimit.global.windowMs,
+  message: 'Too many requests from this IP, please try again later',
+}));
+
+// Routes
+app.use('/agents', agentsRouter);
+app.use('/verify', verifyRouter);
+app.use('/refunds', refundsRouter);
+app.use('/disputes', disputesRouter);
+app.use('/escrows/multisig', multisigRouter);
+app.use('/sessions', sessionsRouter);
+
+// Error handler
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
   });
+});
 
-  // Start server
-  app.listen(config.port, () => {
-    logger.info(`Facilitator running on port ${config.port}`, {
-      env: config.env,
-      network: config.aleo.network,
-    });
-  });
-}
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
 
-main().catch((error) => {
-  logger.error('Failed to start facilitator', { error });
-  process.exit(1);
+// Install graceful shutdown handlers (SIGTERM, SIGINT)
+installShutdownHandlers();
+
+// Start server
+const server = app.listen(PORT, async () => {
+  console.log(`ShadowAgent Facilitator running on port ${PORT}`);
+  indexerService.startIndexing();
+});
+
+// Register shutdown cleanup in dependency order (LIFO — last registered runs first)
+onShutdown('HTTP server', () => new Promise<void>((resolve) => server.close(() => resolve())));
+onShutdown('Background indexer', () => indexerService.stopIndexing());
+onShutdown('Redis connection', async () => {
+  const redis = getRedisService();
+  if (redis.isConnected()) await redis.disconnect();
 });
 ```
 
@@ -947,13 +1241,13 @@ COPY dist/ ./dist/
 
 # Set environment
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=3001
 
-EXPOSE 3000
+EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
 # Run
 CMD ["node", "dist/index.js"]
@@ -969,7 +1263,7 @@ services:
   facilitator:
     build: .
     ports:
-      - "3000:3000"
+      - "3001:3001"
     environment:
       - NODE_ENV=production
       - ALEO_NETWORK=testnet
@@ -998,7 +1292,7 @@ npm start
 
 # Docker
 docker build -t shadow-facilitator .
-docker run -p 3000:3000 shadow-facilitator
+docker run -p 3001:3001 shadow-facilitator
 ```
 
 ---
@@ -1007,23 +1301,51 @@ docker run -p 3000:3000 shadow-facilitator
 
 ```bash
 # Health check
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 
 # Search agents
-curl "http://localhost:3000/agents?service_type=1&min_tier=2"
+curl "http://localhost:3001/agents?service_type=1&min_tier=2"
 
 # Get agent
-curl http://localhost:3000/agents/123field
+curl http://localhost:3001/agents/123field
 
 # Verify escrow proof
-curl -X POST http://localhost:3000/verify/escrow \
+curl -X POST http://localhost:3001/verify/escrow \
   -H "Content-Type: application/json" \
   -d '{"proof": {...}, "expected_agent": "aleo1...", "min_amount": 100000}'
 
 # Verify reputation proof
-curl -X POST http://localhost:3000/verify/reputation \
+curl -X POST http://localhost:3001/verify/reputation \
   -H "Content-Type: application/json" \
   -d '{"proof": {...}, "proof_type": 4, "threshold": 2}'
+
+# Propose a partial refund (Phase 10a)
+curl -X POST http://localhost:3001/refunds \
+  -H "Content-Type: application/json" \
+  -d '{"agent": "aleo1...", "total_amount": 100000, "agent_amount": 70000, "job_hash": "abc123"}'
+
+# Open a dispute (Phase 10a)
+curl -X POST http://localhost:3001/disputes \
+  -H "Content-Type: application/json" \
+  -d '{"client": "aleo1...", "agent": "aleo1...", "job_hash": "abc123", "escrow_amount": 100000, "evidence_hash": "sha256..."}'
+
+# Create multi-sig escrow (Phase 10a)
+curl -X POST http://localhost:3001/escrows/multisig \
+  -H "Content-Type: application/json" \
+  -d '{"owner": "aleo1...", "agent": "aleo1...", "amount": 100000, "job_hash": "abc123", "signers": ["aleo1a...", "aleo1b...", "aleo1c..."], "required_sigs": 2}'
+
+# Create a session (Phase 5)
+curl -X POST http://localhost:3001/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"client": "aleo1...", "agent": "aleo1...", "max_total": 500000, "max_per_request": 10000, "rate_limit": 50, "duration_blocks": 1000}'
+
+# Create a spending policy (Phase 5)
+curl -X POST http://localhost:3001/sessions/policies \
+  -H "Content-Type: application/json" \
+  -d '{"owner": "aleo1...", "max_session_value": 1000000, "max_single_request": 50000}'
+
+# Get session status
+curl http://localhost:3001/sessions/{sessionId}
 ```
 
 ---

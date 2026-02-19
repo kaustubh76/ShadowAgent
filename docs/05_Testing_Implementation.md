@@ -4,6 +4,30 @@
 
 This guide covers comprehensive testing strategies for all ShadowAgent components: Leo smart contracts, Facilitator service, SDK, and Frontend.
 
+### Test Suite Summary
+
+| Component | Tests | Key Test Files |
+|-----------|-------|---------------|
+| **SDK** | 168 | `client.test.ts`, `agent.test.ts`, `crypto.test.ts`, `decay.test.ts`, `decay-cross-verify.test.ts` |
+| **Facilitator** | 342 | `agents.test.ts`, `sessions.test.ts`, `disputes.test.ts`, `refunds.test.ts`, `multisig.test.ts`, `rateLimiter.test.ts`, `x402.test.ts`, `integration.test.ts`, `ttlStore.test.ts`, `resilience.test.ts`, `shutdown.test.ts`, `consistentHash.test.ts`, `health.test.ts`, `verify.test.ts`, `aleo.test.ts`, `indexer.test.ts` |
+| **Frontend** | Partial | Component tests (`AgentCard`, `RatingForm`, `TierBadge`), Store tests (`agentStore`, `sdkStore`, `walletStore`), API tests (`api.test.ts`) |
+| **Total** | 510+ | All passing |
+
+### SDK Test Environment Setup
+
+The SDK requires a `globalThis.crypto` polyfill for Node.js test environments:
+
+```typescript
+// src/jest.setup.ts — referenced in jest.config.js setupFiles
+import { webcrypto } from 'crypto';
+
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}
+```
+
+This provides `SHA-256`, `getRandomValues()`, and `randomUUID()` in Node.js, matching the browser `crypto` API the SDK relies on.
+
 ---
 
 ## 1. Smart Contract Testing
@@ -534,7 +558,7 @@ npm test -- --watch
 ### 3.1 Test Setup
 
 ```bash
-cd shadow-agent-sdk
+cd shadow-sdk
 
 # Install test dependencies
 npm install --save-dev jest @types/jest ts-jest
@@ -784,6 +808,25 @@ describe('Crypto Utilities', () => {
 });
 ```
 
+### 3.5 Reputation Decay Tests (Phase 10a)
+
+```typescript
+// src/decay.test.ts — Tests for calculateDecayedRating and estimateDecayPeriods
+
+describe('Reputation Decay', () => {
+  test('applies 95% decay per period', () => { /* ... */ });
+  test('caps at MAX_DECAY_STEPS (10)', () => { /* ... */ });
+  test('estimateDecayPeriods returns correct count', () => { /* ... */ });
+  test('calculateEffectiveTier downgrades after decay', () => { /* ... */ });
+});
+
+// src/decay-cross-verify.test.ts — Cross-verifies SDK decay math against Leo contract logic
+describe('Decay Cross-Verification', () => {
+  test('SDK and contract produce identical decay results', () => { /* ... */ });
+  test('tier boundaries match after decay', () => { /* ... */ });
+});
+```
+
 ---
 
 ## 4. Frontend Testing
@@ -791,7 +834,7 @@ describe('Crypto Utilities', () => {
 ### 4.1 Test Setup
 
 ```bash
-cd shadow-agent-ui
+cd shadow-frontend
 
 # Install test dependencies
 npm install --save-dev vitest @testing-library/react @testing-library/jest-dom jsdom
@@ -1146,7 +1189,7 @@ jobs:
 
       - name: Install and Test
         run: |
-          cd shadow-agent-sdk
+          cd shadow-sdk
           npm ci
           npm test -- --coverage
 
@@ -1162,7 +1205,7 @@ jobs:
 
       - name: Install and Test
         run: |
-          cd shadow-agent-ui
+          cd shadow-frontend
           npm ci
           npm test -- --coverage
 ```

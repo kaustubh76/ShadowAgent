@@ -11,15 +11,15 @@ This guide covers implementing both the Client SDK (for service consumers) and t
 ### 1.1 Initialize SDK Package
 
 ```bash
-mkdir shadow-agent-sdk
-cd shadow-agent-sdk
+mkdir shadow-sdk
+cd shadow-sdk
 
 # Initialize monorepo with workspaces
 npm init -y
 
 # Install development dependencies
 npm install typescript @types/node --save-dev
-npm install @aleohq/sdk axios
+npm install @provablehq/sdk axios
 
 # Initialize TypeScript
 npx tsc --init
@@ -28,25 +28,21 @@ npx tsc --init
 ### 1.2 Project Structure
 
 ```
-shadow-agent-sdk/
+shadow-sdk/
 ├── src/
-│   ├── index.ts              # Main exports
-│   ├── client/
-│   │   ├── index.ts          # Client SDK
-│   │   ├── escrow.ts         # Escrow operations
-│   │   └── rating.ts         # Rating operations
-│   ├── agent/
-│   │   ├── index.ts          # Agent SDK
-│   │   ├── reputation.ts     # Reputation management
-│   │   └── middleware.ts     # Express middleware
-│   ├── common/
-│   │   ├── aleo.ts           # Aleo SDK wrapper
-│   │   ├── types.ts          # Shared types
-│   │   └── constants.ts      # Constants
-│   └── utils/
-│       ├── crypto.ts         # Crypto utilities
-│       └── encoding.ts       # Encoding helpers
-├── tests/
+│   ├── index.ts                  # Main exports + quickStart helper
+│   ├── client.ts                 # ShadowAgentClient (consumer-facing SDK)
+│   ├── agent.ts                  # ShadowAgentServer (provider-facing SDK)
+│   ├── crypto.ts                 # Crypto utilities + on-chain helpers
+│   ├── types.ts                  # All TypeScript types, enums, constants
+│   ├── jest.setup.ts             # globalThis.crypto polyfill for Node tests
+│   ├── __mocks__/                # Jest mock files
+│   │   └── @provablehq/sdk.ts   # WASM SDK mock for unit tests
+│   ├── client.test.ts            # Client SDK tests
+│   ├── agent.test.ts             # Agent SDK tests
+│   ├── crypto.test.ts            # Crypto utility tests
+│   ├── decay.test.ts             # Reputation decay tests (Phase 10a)
+│   └── decay-cross-verify.test.ts # Cross-verification: SDK vs contract decay
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -67,7 +63,7 @@ shadow-agent-sdk/
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@aleohq/sdk": "^0.6.0",
+    "@provablehq/sdk": "^0.9.15",
     "axios": "^1.6.0"
   },
   "peerDependencies": {
@@ -306,7 +302,9 @@ export interface AgentSearchParams {
 ```typescript
 // src/common/constants.ts
 
-export const PROGRAM_ID = 'shadow_agent.aleo';
+export const SHADOW_AGENT_PROGRAM = 'shadow_agent.aleo';
+export const SHADOW_AGENT_EXT_PROGRAM = 'shadow_agent_ext.aleo';
+export const SHADOW_AGENT_SESSION_PROGRAM = 'shadow_agent_session.aleo';
 
 export const RPC_URLS = {
   testnet: 'https://api.explorer.aleo.org/v1/testnet',
@@ -346,7 +344,7 @@ export const RATING_SCALE = 10;
 ```typescript
 // src/common/aleo.ts
 
-import { Account, ProgramManager, AleoNetworkClient } from '@aleohq/sdk';
+import { Account, ProgramManager, AleoNetworkClient } from '@provablehq/sdk';
 import { PROGRAM_ID, RPC_URLS } from './constants';
 
 export class AleoWrapper {
@@ -518,10 +516,10 @@ export function generateNullifier(
 ## 6. Client SDK Implementation
 
 ```typescript
-// src/client/index.ts
+// src/client.ts
 
 import axios, { AxiosInstance } from 'axios';
-import { AleoWrapper } from '../common/aleo';
+import { AleoWrapper } from './crypto';
 import {
   ClientConfig,
   PaymentTerms,
@@ -529,14 +527,14 @@ import {
   AgentSearchResult,
   AgentSearchParams,
   SubmitRatingParams,
-} from '../common/types';
+} from './types';
 import {
   FACILITATOR_URLS,
   RATING_BURN_COST,
   RATING_SCALE,
   DEFAULT_ESCROW_BLOCKS,
-} from '../common/constants';
-import { generateJobHash, generateSecret, generateRandomField } from '../utils/crypto';
+} from './types';
+import { generateJobHash, generateSecret, generateRandomField } from './crypto';
 
 export class ShadowAgentClient {
   private aleo: AleoWrapper;
@@ -911,6 +909,59 @@ export class ShadowAgentClient {
       status: ${session.status}u8
     }`;
   }
+
+  // ═════════════════════════════════════════════════════════════════
+  // PHASE 10a: Disputes, Refunds, Multi-Sig
+  // ═════════════════════════════════════════════════════════════════
+
+  async openDispute(params: {
+    agent: string; jobHash: string; escrowAmount: bigint; evidenceHash: string;
+  }): Promise<Dispute> { /* try on-chain → fallback to facilitator POST /disputes */ }
+
+  async getDisputeStatus(jobHash: string): Promise<Dispute | null> {
+    /* GET /disputes/:jobHash */
+  }
+
+  async proposePartialRefund(params: {
+    agent: string; totalAmount: bigint; agentAmount: bigint; jobHash: string;
+  }): Promise<PartialRefundProposal> { /* POST /refunds */ }
+
+  async getPartialRefundStatus(jobHash: string): Promise<PartialRefundProposal | null> {
+    /* GET /refunds/:jobHash */
+  }
+
+  async createMultiSigEscrow(params: {
+    agent: string; amount: bigint; jobHash: string;
+    signers: [string, string, string]; requiredSigs: number;
+  }): Promise<MultiSigEscrow> { /* POST /escrows/multisig */ }
+
+  async getMultiSigEscrowStatus(jobHash: string): Promise<MultiSigEscrow | null> {
+    /* GET /escrows/multisig/:jobHash */
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // PHASE 5: Policy Management
+  // ═════════════════════════════════════════════════════════════════
+
+  async createPolicy(params: {
+    maxSessionValue: bigint; maxSingleRequest: bigint;
+    allowedTiers?: number; allowedCategories?: bigint; requireProofs?: boolean;
+  }): Promise<SpendingPolicy> { /* POST /sessions/policies */ }
+
+  async createSessionFromPolicy(policyId: string, params: {
+    agent: string; maxTotal: bigint; maxPerRequest: bigint;
+    rateLimit: bigint; durationBlocks: number;
+  }): Promise<PaymentSession> { /* POST /sessions/policies/:policyId/create-session */ }
+
+  async listPolicies(): Promise<SpendingPolicy[]> { /* GET /sessions/policies */ }
+
+  async getPolicy(policyId: string): Promise<SpendingPolicy | null> {
+    /* GET /sessions/policies/:policyId */
+  }
+
+  async getSessionStatus(sessionId: string): Promise<PaymentSession | null> {
+    /* GET /sessions/:sessionId */
+  }
 }
 ```
 
@@ -919,9 +970,9 @@ export class ShadowAgentClient {
 ## 7. Agent SDK Implementation
 
 ```typescript
-// src/agent/index.ts
+// src/agent.ts
 
-import { AleoWrapper } from '../common/aleo';
+import { AleoWrapper } from './crypto';
 import {
   AgentConfig,
   AgentReputation,
@@ -930,8 +981,8 @@ import {
   Tier,
   ProofType,
   ServiceType,
-} from '../common/types';
-import { generateSecret, generateRandomField } from '../utils/crypto';
+} from './types';
+import { generateSecret, generateRandomField } from './crypto';
 
 export class ShadowAgentServer {
   private aleo: AleoWrapper;
@@ -1315,6 +1366,42 @@ export class ShadowAgentServer {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // PHASE 10a: Decay, Disputes, Refunds
+  // ═══════════════════════════════════════════════════════════════════
+
+  async getReputationWithDecay(): Promise<DecayedReputation> {
+    /* Returns reputation adjusted for time decay (95% per period, max 10 steps) */
+  }
+
+  async proveReputationWithDecay(proofType: ProofType, threshold: number): Promise<ReputationProof> {
+    /* Generate ZK proof using decay-adjusted reputation values */
+  }
+
+  async acceptPartialRefund(jobHash: string): Promise<void> {
+    /* POST /refunds/:jobHash/accept — agent accepts proposed refund split */
+  }
+
+  async rejectPartialRefund(jobHash: string): Promise<void> {
+    /* POST /refunds/:jobHash/reject — agent rejects proposed refund */
+  }
+
+  async getPendingRefundProposals(): Promise<PartialRefundProposal[]> {
+    /* GET /refunds?agent=<address>&status=proposed */
+  }
+
+  async respondToDispute(jobHash: string, evidenceHash: string): Promise<void> {
+    /* POST /disputes/:jobHash/respond — agent submits counter-evidence */
+  }
+
+  async getOpenDisputes(): Promise<Dispute[]> {
+    /* GET /disputes?agent=<address>&status=opened */
+  }
+
+  async approveMultiSigEscrow(jobHash: string): Promise<void> {
+    /* POST /escrows/multisig/:jobHash/approve — agent approves escrow release */
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // FORMATTING HELPERS
   // ═══════════════════════════════════════════════════════════════════
 
@@ -1392,8 +1479,8 @@ export class ShadowAgentServer {
 
 import { Request, Response, NextFunction } from 'express';
 import { ShadowAgentServer } from './index';
-import { PaymentTerms } from '../common/types';
-import { generateJobHash } from '../utils/crypto';
+import { PaymentTerms } from './types';
+import { generateJobHash } from './crypto';
 
 interface MiddlewareOptions {
   agent: ShadowAgentServer;
@@ -1487,26 +1574,43 @@ export function shadowAgentMiddleware(options: MiddlewareOptions) {
 ```typescript
 // src/index.ts
 
-// Client SDK
-export { ShadowAgentClient } from './client';
+// ── Client & Agent SDK classes ──
+export { ShadowAgentClient, createClient } from './client';
+export { ShadowAgentServer, createAgent } from './agent';
 
-// Agent SDK
-export { ShadowAgentServer } from './agent';
-export { shadowAgentMiddleware } from './agent/middleware';
-
-// Types
-export * from './common/types';
-
-// Constants
-export * from './common/constants';
-
-// Utilities
+// ── All types & enums ──
 export {
-  generateJobHash,
-  generateSecret,
-  generateNullifier,
-  generateRandomField,
-} from './utils/crypto';
+  ServiceType, Tier, ProofType, EscrowStatus,
+  DisputeStatus, RefundStatus, SessionStatus,
+  type AgentListing, type AgentReputation, type RatingRecord,
+  type ReputationProof, type EscrowRecord, type PaymentTerms,
+  type EscrowProof, type VerificationResult, type TransactionReceipt,
+  type PaymentSession, type SessionReceipt, type SpendingPolicy,
+  type PartialRefundProposal, type Dispute, type DecayedReputation,
+  type MultiSigEscrow, type ClientConfig, type AgentConfig,
+  type RequestOptions, type RequestResult,
+  TIER_THRESHOLDS, RATING_CONSTANTS, DECAY_CONSTANTS,
+} from './types';
+
+// ── Crypto & on-chain utilities ──
+export {
+  SHADOW_AGENT_PROGRAM, SHADOW_AGENT_EXT_PROGRAM, SHADOW_AGENT_SESSION_PROGRAM,
+  hashSecret, generateAgentId, generateJobHash, generateNullifier,
+  generateSecret, generateCommitment, generateBondCommitment,
+  encodeBase64, decodeBase64, verifyHash, generateSessionId,
+  signData, verifySignature,
+  createEscrowProof, createReputationProof,
+  createAccount, getAddress, generatePrivateKey,
+  getBalance, getBlockHeight,
+  transferPublic, transferPrivate, executeCreditsProgram, executeProgram,
+  waitForTransaction,
+  currency, rating, credits,
+  calculateDecayedRating, estimateDecayPeriods, calculateEffectiveTier,
+} from './crypto';
+
+// ── Quick start helpers ──
+export { quickStart } from './index';
+export const VERSION = '0.1.0';
 ```
 
 ---

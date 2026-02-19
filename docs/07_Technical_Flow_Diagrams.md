@@ -435,6 +435,10 @@ This document provides detailed technical flow diagrams for each component of th
 │                              │  │  • POST /verify/escrow              ││        │
 │                              │  │  • POST /verify/reputation          ││        │
 │                              │  │  • GET /health, /health/ready       ││        │
+│                              │  │  • /disputes (Phase 10a)            ││        │
+│                              │  │  • /refunds (Phase 10a)             ││        │
+│                              │  │  • /escrows/multisig (Phase 10a)    ││        │
+│                              │  │  • /sessions (Phase 5)              ││        │
 │                              │  └─────────────────────────────────────┘│        │
 │                              │                   │                     │        │
 │                              │                   ▼                     │        │
@@ -728,21 +732,26 @@ This document provides detailed technical flow diagrams for each component of th
 │   COMPONENT HIERARCHY:                                                           │
 │   ┌─────────────────────────────────────────────────────────────────────────┐   │
 │   │                                                                         │   │
-│   │   App                                                                   │   │
+│   │   App (ErrorBoundary + ToastProvider + Suspense)                        │   │
 │   │    └── Layout                                                          │   │
 │   │         ├── Header                                                     │   │
+│   │         │    ├── Nav (Home, Find Agents, Dashboard, Disputes, Activity)│   │
 │   │         │    └── ConnectWallet ←──── walletStore                       │   │
-│   │         ├── Sidebar                                                    │   │
-│   │         └── Main Content                                               │   │
-│   │              ├── AgentDashboard (activeView === 'agent')               │   │
-│   │              │    ├── ReputationCard ←──── agentStore                  │   │
-│   │              │    ├── ProofGenerator ←──── agentStore                  │   │
-│   │              │    └── TransactionLog ←──── agentStore.transactions     │   │
-│   │              │                                                         │   │
-│   │              └── ClientDashboard (activeView === 'client')             │   │
-│   │                   ├── AgentSearch ←──── clientStore.filters            │   │
-│   │                   ├── AgentCard[] ←──── clientStore.searchResults      │   │
-│   │                   └── TransactionLog ←──── clientStore.transactions    │   │
+│   │         └── <Outlet /> (route-based pages)                             │   │
+│   │              ├── AgentDashboard (/agent)                               │   │
+│   │              │    ├── RegistrationForm ←──── signTransaction           │   │
+│   │              │    ├── ReputationPanel ←──── agentStore                 │   │
+│   │              │    └── ActiveSessionsPanel ←──── api                    │   │
+│   │              ├── ClientDashboard (/client)                             │   │
+│   │              │    ├── AgentSearch ←──── agentStore.filters             │   │
+│   │              │    └── AgentCard[] ←──── agentStore.searchResults       │   │
+│   │              ├── AgentDetails (/agents/:id)                            │   │
+│   │              │    ├── RequestServiceModal ←──── useEscrowTransaction   │   │
+│   │              │    ├── ReputationProofModal / DisputeForm / RatingForm  │   │
+│   │              │    ├── PartialRefundModal / MultiSigEscrowForm          │   │
+│   │              │    └── SessionManager ←──── api (sessions)              │   │
+│   │              ├── DisputeCenter (/disputes) ←──── api (disputes)        │   │
+│   │              └── TransactionHistory (/activity) ←──── agentStore.txns  │   │
 │   │                                                                         │   │
 │   └─────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                   │
@@ -816,6 +825,98 @@ This document provides detailed technical flow diagrams for each component of th
 │   │      clientStore.addTransaction({ type: 'escrow_created', ... })       │   │
 │   │                                                                         │   │
 │   └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.3 Transaction History / Activity Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      TRANSACTION HISTORY (Activity Page)                          │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                   │
+│   DATA SOURCES (6 call sites adding transactions):                               │
+│                                                                                   │
+│   AgentDetails.tsx ─────┬── dispute_opened          ──┐                          │
+│                         ├── partial_refund_proposed  ──┤                          │
+│                         └── rating_submitted         ──┤                          │
+│   CreateSessionForm.tsx ── session_created           ──┤  agentStore              │
+│   PolicyManager.tsx ────── session_created           ──┤  .addTransaction()       │
+│   SessionManager.tsx ───── session_closed            ──┤  (50-item cap)          │
+│                                                       │                          │
+│                                                       ▼                          │
+│                                            ┌──────────────────┐                  │
+│                                            │  agentStore      │                  │
+│                                            │  .transactions[] │                  │
+│                                            │  (localStorage)  │                  │
+│                                            └────────┬─────────┘                  │
+│                                                     │                            │
+│                                                     ▼                            │
+│   ┌─────────────────────────────────────────────────────────────────────────┐   │
+│   │  TransactionHistory.tsx (/activity)                                     │   │
+│   ├─────────────────────────────────────────────────────────────────────────┤   │
+│   │                                                                         │   │
+│   │  ┌── Filter Tabs ──────────────────────────────────────────────┐       │   │
+│   │  │  All │ Escrows │ Sessions │ Disputes │ Ratings              │       │   │
+│   │  └─────────────────────────────────────────────────────────────┘       │   │
+│   │                           │                                            │   │
+│   │                           ▼                                            │   │
+│   │  ┌── Transaction Card ─────────────────────────────────────────┐      │   │
+│   │  │  [Type Badge]  agent_id (→ /agents/:id)    amount   timeAgo │      │   │
+│   │  └─────────────────────────────────────────────────────────────┘      │   │
+│   │                                                                         │   │
+│   │  Transaction Types & Colors:                                           │   │
+│   │  ┌────────────────────────────┬────────────┬──────────┐              │   │
+│   │  │ Type                       │ Icon       │ Color    │              │   │
+│   │  ├────────────────────────────┼────────────┼──────────┤              │   │
+│   │  │ escrow_created             │ Lock       │ blue     │              │   │
+│   │  │ escrow_claimed             │ CheckCircle│ green    │              │   │
+│   │  │ rating_submitted           │ Star       │ amber    │              │   │
+│   │  │ dispute_opened             │ AlertTri   │ red      │              │   │
+│   │  │ dispute_resolved           │ Scale      │ purple   │              │   │
+│   │  │ partial_refund_proposed    │ ArrowLR    │ orange   │              │   │
+│   │  │ partial_refund_accepted    │ ThumbsUp   │ emerald  │              │   │
+│   │  │ session_created            │ Zap        │ shadow   │              │   │
+│   │  │ session_closed             │ XCircle    │ gray     │              │   │
+│   │  └────────────────────────────┴────────────┴──────────┘              │   │
+│   │                                                                         │   │
+│   └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.4 Manual Transaction Building Flow (Fee Fix)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│              MANUAL TX BUILDING (bypasses SDK fee floor bug)                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                   │
+│   WalletProvider.signTransaction() / SDK.transferPublic()                        │
+│                                                                                   │
+│   Step 1: buildAuthorization({ programName, functionName, privateKey, inputs })  │
+│              │                                                                    │
+│              ▼                                                                    │
+│   Step 2: authorization.toExecutionId() → executionId                           │
+│           estimateFeeForAuthorization({ authorization, programName })            │
+│              │  Returns ~2,725 microcredits (NOT 10,000,000,000!)               │
+│              ▼                                                                    │
+│   Step 3: buildFeeAuthorization({                                               │
+│              deploymentOrExecutionId, baseFeeCredits, priorityFeeCredits,       │
+│              privateKey })                                                        │
+│              │                                                                    │
+│              ▼                                                                    │
+│   Step 4: buildTransactionFromAuthorization({                                   │
+│              programName, authorization, feeAuthorization })                     │
+│              │                                                                    │
+│              ▼                                                                    │
+│   Step 5: networkClient.submitTransaction(tx.toString())                        │
+│              │                                                                    │
+│              ▼                                                                    │
+│           Transaction ID returned (at1...)                                       │
+│                                                                                   │
+│   Actual fee: ~0.002725 ALEO (vs broken SDK: ~10,000 ALEO)                     │
 │                                                                                   │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1312,6 +1413,132 @@ Solves the micropayment UX problem:
             ▼               ▼
      resume_session    Funds → Agent
      ──► ACTIVE        on-chain
+```
+
+---
+
+## 9. PHASE 10a FLOWS (Disputes, Refunds, Multi-Sig)
+
+### 9.1 Dispute Resolution Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DISPUTE LIFECYCLE                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   CLIENT                    FACILITATOR              AGENT        │
+│   ──────                    ───────────              ─────        │
+│     │                            │                     │          │
+│     │  POST /disputes            │                     │          │
+│     │  (evidence_hash)           │                     │          │
+│     │───────────────────────────>│  status: "opened"   │          │
+│     │                            │                     │          │
+│     │                            │  Notify agent       │          │
+│     │                            │────────────────────>│          │
+│     │                            │                     │          │
+│     │                            │  POST /disputes/:id/respond    │
+│     │                            │<────────────────────│          │
+│     │                            │  status: "agent_responded"     │
+│     │                            │                     │          │
+│     │                      ADMIN │  POST /disputes/:id/resolve    │
+│     │                            │  (agent_pct: 30)    │          │
+│     │                            │                     │          │
+│     │  Receives 70%              │              Receives 30%      │
+│     │<───────────────────────────│────────────────────>│          │
+│     │                            │                     │          │
+│   Statuses: opened → agent_responded → resolved_split            │
+│             (or resolved_client / resolved_agent)                 │
+│   TTL: 90 days                                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 Partial Refund Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PARTIAL REFUND LIFECYCLE                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   CLIENT                    FACILITATOR              AGENT        │
+│     │                            │                     │          │
+│     │  POST /refunds             │                     │          │
+│     │  (total: 100, agent: 70)   │                     │          │
+│     │───────────────────────────>│  status: "proposed" │          │
+│     │                            │                     │          │
+│     │                            │  POST /refunds/:id/accept      │
+│     │                            │<────────────────────│          │
+│     │                            │  status: "accepted" │          │
+│     │  Agent gets 70             │                     │          │
+│     │  Client gets 30            │              Agent gets 70     │
+│     │                            │                     │          │
+│     │         ── OR ──           │                     │          │
+│     │                            │  POST /refunds/:id/reject      │
+│     │                            │<────────────────────│          │
+│     │                            │  status: "rejected" │          │
+│     │                            │                     │          │
+│   TTL: 30 days                                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.3 Multi-Sig Escrow Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MULTI-SIG ESCROW LIFECYCLE                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   OWNER          FACILITATOR         SIGNER 1   SIGNER 2   S3   │
+│     │                 │                 │          │          │   │
+│     │  POST /escrows/ │                 │          │          │   │
+│     │  multisig       │                 │          │          │   │
+│     │  (3 signers,    │                 │          │          │   │
+│     │   required: 2)  │                 │          │          │   │
+│     │────────────────>│  status:"locked"│          │          │   │
+│     │                 │                 │          │          │   │
+│     │                 │  POST /:id/approve (mutex) │          │   │
+│     │                 │<────────────────│          │          │   │
+│     │                 │  sig_count: 1   │          │          │   │
+│     │                 │                 │          │          │   │
+│     │                 │  POST /:id/approve (mutex) │          │   │
+│     │                 │<───────────────────────────│          │   │
+│     │                 │  sig_count: 2 ≥ required   │          │   │
+│     │                 │  status: "released"         │          │   │
+│     │                 │                 │          │          │   │
+│   Mutex prevents TOCTOU race on concurrent approvals             │
+│   TTL: 30 days                                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.4 Session Policy Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    POLICY → SESSION FLOW                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   CLIENT                    FACILITATOR                          │
+│     │                            │                                │
+│     │  POST /sessions/policies   │                                │
+│     │  (max_value: 1M,           │                                │
+│     │   max_request: 50K)        │                                │
+│     │───────────────────────────>│  policy_id created             │
+│     │                            │                                │
+│     │  POST /sessions/policies/  │                                │
+│     │  :policyId/create-session  │                                │
+│     │  (agent, max_total ≤ 1M,   │                                │
+│     │   max_per_req ≤ 50K)       │                                │
+│     │───────────────────────────>│  Validates against policy      │
+│     │                            │  Session created               │
+│     │                            │                                │
+│     │  POST /sessions/:id/pause  │  status: "paused"              │
+│     │───────────────────────────>│                                │
+│     │                            │                                │
+│     │  POST /sessions/:id/resume │  status: "active"              │
+│     │───────────────────────────>│                                │
+│     │                            │                                │
+│   Policy reusable for multiple sessions                          │
+│   Policy TTL: 30 days | Session TTL: 7 days                     │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---

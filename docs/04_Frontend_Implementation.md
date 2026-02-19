@@ -2,9 +2,9 @@
 
 ## Overview
 
-The ShadowAgent frontend is a React single-page application providing views for **Agent Dashboard** (register, manage, prove), **Client Discovery** (search, hire, pay), and **Dispute Center** (disputes, refunds). It integrates directly with the `shadow_agent.aleo` and `shadow_agent_ext.aleo` smart contracts deployed on Aleo testnet via the `@provablehq/sdk` and the `@shadowagent/sdk`.
+The ShadowAgent frontend is a React single-page application providing views for **Agent Dashboard** (register, manage, prove), **Client Discovery** (search, hire, pay), and **Dispute Center** (disputes, refunds). It integrates directly with the `shadow_agent.aleo`, `shadow_agent_ext.aleo`, and `shadow_agent_session.aleo` smart contracts on Aleo testnet via the `@provablehq/sdk` and the `@shadowagent/sdk`.
 
-**Live Contracts:** `shadow_agent.aleo` + `shadow_agent_ext.aleo` on Aleo testnet
+**Live Contracts:** `shadow_agent.aleo` + `shadow_agent_ext.aleo` on Aleo testnet | `shadow_agent_session.aleo` (pending deployment)
 **Core Deploy TX:** `at105knrkmfhsc8mlzd3sz5nmk2vy4jnsjdktdwq4fr236jcssasvpqp2sv9p`
 **Extension Deploy TX:** `at1fpwhdvs77vn37ngxrnty40qxsnwwuccu660e73f409nssjk3vyqqxpx647`
 
@@ -52,6 +52,7 @@ shadow-frontend/
 ├── src/
 │   ├── main.tsx                    # Entry point (BrowserRouter + WalletProvider)
 │   ├── App.tsx                     # Routes, ErrorBoundary, NotFound page
+│   ├── config.ts                   # Centralized config (FACILITATOR_URL, API_BASE, FACILITATOR_ENABLED)
 │   ├── index.css                   # Global styles, design system, animations
 │   ├── components/
 │   │   ├── Layout.tsx              # Shell: ambient background, header, footer
@@ -59,29 +60,45 @@ shadow-frontend/
 │   │   ├── AgentCard.tsx           # Agent listing card with shine effects
 │   │   ├── TierBadge.tsx           # Tier indicator (New/Bronze/Silver/Gold/Diamond)
 │   │   ├── ConnectWallet.tsx       # Shield Wallet connect/balance/disconnect
+│   │   ├── DisputeForm.tsx         # Dispute submission with evidence hashing
+│   │   ├── PartialRefundModal.tsx  # Refund proposal with agent/client split slider
 │   │   ├── RatingForm.tsx          # Star rating submission (Phase 10a)
-│   │   └── MultiSigApprovalPanel.tsx # Multi-sig escrow approval UI (Phase 10a)
+│   │   ├── MultiSigEscrowForm.tsx  # Multi-sig escrow creation (Phase 10a)
+│   │   ├── MultiSigApprovalPanel.tsx # Multi-sig escrow approval UI (Phase 10a)
+│   │   ├── SessionManager.tsx      # Session payment management modal (Phase 5)
+│   │   ├── session/
+│   │   │   ├── CreateSessionForm.tsx # Session creation form
+│   │   │   ├── SessionList.tsx     # Active/paused session list
+│   │   │   └── PolicyManager.tsx   # Session policy management
+│   │   └── agent/
+│   │       ├── RegistrationForm.tsx  # Agent registration form
+│   │       ├── ReputationPanel.tsx   # ZK proof generation panel
+│   │       ├── ActiveSessionsPanel.tsx # Agent's active sessions
+│   │       └── SkeletonStats.tsx     # Loading skeleton for stats
 │   ├── pages/
 │   │   ├── HomePage.tsx            # Landing: hero, features, roadmap
 │   │   ├── AgentDashboard.tsx      # Register agent, view stats, generate proofs
 │   │   ├── ClientDashboard.tsx     # Search agents with filters + multi-sig
 │   │   ├── DisputeCenter.tsx       # Disputes + partial refunds (Phase 10a)
-│   │   └── AgentDetails.tsx        # Agent detail + hire modal + proof modal
+│   │   ├── AgentDetails.tsx        # Agent detail + hire modal + proof modal
+│   │   └── TransactionHistory.tsx  # Activity feed with filtered transaction log
 │   ├── providers/
-│   │   └── WalletProvider.tsx      # Shield Wallet context (ProgramManager)
+│   │   └── WalletProvider.tsx      # Shield Wallet context (manual tx building)
 │   ├── contexts/
 │   │   └── ToastContext.tsx        # Toast notification system
 │   ├── stores/
-│   │   ├── agentStore.ts           # Agent/client state (Zustand)
+│   │   ├── agentStore.ts           # Agent/client state (Zustand, persisted)
 │   │   ├── walletStore.ts          # Wallet connection state
 │   │   └── sdkStore.ts             # SDK client state + health checks
 │   ├── hooks/
-│   │   ├── useTransactions.ts      # Escrow creation, balance checks
+│   │   ├── useTransactions.ts      # Escrow creation, balance checks, ZK proofs
 │   │   └── useCopyToClipboard.ts   # Clipboard utility hook
 │   ├── services/
 │   │   └── aleo.ts                 # On-chain queries, tx builders, formatters
 │   ├── lib/
 │   │   └── api.ts                  # Facilitator API client (search, verify)
+│   ├── utils/
+│   │   └── timeAgo.ts              # Relative timestamp formatting
 │   └── constants/
 │       └── ui.ts                   # Timing, validation, external URLs
 ├── tailwind.config.js              # Design tokens, animations, color system
@@ -142,12 +159,13 @@ VITE_SHIELD_WALLET_VIEW_KEY=AViewKey1...        # Record decryption key
 The app uses React Router v6 with a shared layout:
 
 ```
-/           → HomePage        (landing page)
-/agent      → AgentDashboard  (register, manage, prove)
-/client     → ClientDashboard (search agents, multi-sig escrow)
-/disputes   → DisputeCenter   (disputes + refunds)
-/agents/:id → AgentDetails    (detail view + hire)
-*           → NotFound        (404)
+/           → HomePage            (landing page)
+/agent      → AgentDashboard      (register, manage, prove)
+/client     → ClientDashboard     (search agents, multi-sig escrow)
+/disputes   → DisputeCenter       (disputes + refunds)
+/activity   → TransactionHistory  (transaction activity feed)
+/agents/:id → AgentDetails        (detail view + hire)
+*           → NotFound            (404)
 ```
 
 ```tsx
@@ -158,6 +176,7 @@ The app uses React Router v6 with a shared layout:
     <Route path="agent" element={<AgentDashboard />} />
     <Route path="client" element={<ClientDashboard />} />
     <Route path="disputes" element={<DisputeCenter />} />
+    <Route path="activity" element={<TransactionHistory />} />
     <Route path="agents/:agentId" element={<AgentDetails />} />
     <Route path="*" element={<NotFound />} />
   </Route>
@@ -214,8 +233,17 @@ interface AgentState {
   filters: SearchFilters;
   isSearching: boolean;
 
-  // Transaction history (last 50)
-  transactions: Array<{ id; type; agentId; amount?; timestamp }>;
+  // Transaction history (last 50, persisted to localStorage)
+  transactions: Array<{
+    id: string;
+    type: 'escrow_created' | 'escrow_claimed' | 'rating_submitted'
+        | 'dispute_opened' | 'dispute_resolved'
+        | 'partial_refund_proposed' | 'partial_refund_accepted'
+        | 'session_created' | 'session_closed';
+    agentId: string;
+    amount?: number;      // microcredits
+    timestamp: number;    // Date.now()
+  }>;
 }
 ```
 
@@ -252,17 +280,37 @@ main.tsx
 
 **RPC URL:** The `@provablehq/sdk` classes (`AleoNetworkClient`, `ProgramManager`) internally append `/testnet` to the base URL. Pass only `https://api.explorer.provable.com/v1` — NOT `v1/testnet`.
 
-**Transaction Signing:** Uses the `ExecuteOptions` object API:
+**Transaction Signing:** Uses manual authorization building to bypass the SDK's broken base fee floor (~10,000 ALEO on testnet). The 5-step approach estimates the real fee (~0.003 ALEO):
 
 ```typescript
-const txResult = await programManager.execute({
-  programName: programId,    // e.g. 'shadow_agent.aleo'
-  functionName,              // e.g. 'register_agent'
-  inputs,                    // string[] of Leo-formatted values
-  priorityFee: fee,
-  privateFee: false,         // Use public balance for fees
+// Step 1: Build authorization for the program execution
+const authorization = await programManager.buildAuthorization({
+  programName: programId, functionName, privateKey: privKey, inputs,
 });
+
+// Step 2: Estimate the actual base fee (returns microcredits)
+const executionId = authorization.toExecutionId().toString();
+const baseFeeMicrocredits = await programManager.estimateFeeForAuthorization({
+  authorization, programName: programId,
+});
+const baseFeeCredits = Number(baseFeeMicrocredits) / 1_000_000;
+
+// Step 3: Build fee authorization with the real estimated fee
+const feeAuthorization = await programManager.buildFeeAuthorization({
+  deploymentOrExecutionId: executionId,
+  baseFeeCredits,
+  priorityFeeCredits: fee / 1_000_000,
+  privateKey: privKey,
+});
+
+// Step 4: Build and submit the transaction
+const tx = await programManager.buildTransactionFromAuthorization({
+  programName: programId, authorization, feeAuthorization,
+});
+const txId = await networkClient.submitTransaction(tx.toString());
 ```
+
+> **Note:** Do NOT use `programManager.execute()` or `programManager.transfer()` — they enforce a broken base fee floor of ~10,000 ALEO on testnet despite `estimateExecutionFee` returning only ~2,725 microcredits.
 
 **Balance Fetching:** Uses direct RPC fetch (not SDK) since it's a simple mapping lookup:
 
@@ -393,7 +441,7 @@ Layout.tsx
 ├── divider-glow (gradient line below header)
 ├── Header.tsx
 │   ├── Logo (glow on hover)
-│   ├── Navigation pills (Home, Find Agents, Agent Panel, Disputes)
+│   ├── Navigation pills (Home, Find Agents, Agent Dashboard, Disputes, Activity)
 │   ├── Active route indicator (underline bar)
 │   ├── ConnectWallet.tsx
 │   └── Mobile menu (hamburger + staggered items)
@@ -416,7 +464,9 @@ Layout.tsx
 - *Refunds tab:* List of partial refund proposals with accept/reject buttons for agents
 - Uses `fetchDisputes`, `fetchRefunds`, `respondToDispute`, `acceptRefund`, `rejectRefund` from API client
 
-**AgentDetails** — Back link, header card (name + tier + status), details grid (service info + privacy checks), hire action card with numbered steps, two modals: ReputationProofModal (verify ZK proof) and RequestServiceModal (create escrow payment).
+**AgentDetails** — Back link, header card (name + tier + status), details grid (service info + privacy checks), hire action card with numbered steps. Action modals: ReputationProofModal (verify ZK proof), RequestServiceModal (create escrow payment), DisputeForm, PartialRefundModal, MultiSigEscrowForm, MultiSigApprovalPanel, RatingForm, SessionManager.
+
+**TransactionHistory** — Activity feed displaying the last 50 transactions from `agentStore`. Filter tabs (All / Escrows / Sessions / Disputes / Ratings) with 9 color-coded event type badges. Each row shows type icon+label, clickable agent ID link, amount in credits, and relative timestamp. Persisted to localStorage via Zustand. "Clear History" button to reset.
 
 ### 7.3 Shared Components
 
@@ -466,7 +516,27 @@ approveMultiSigEscrow(jobHash, addr) → { success, escrow?, threshold_met?, err
 submitRating(agentId, data)          → { success, rating?, error? }
 ```
 
-### 8.2 SDK Store Health Checks
+### 8.2 Centralized Configuration (`config.ts`)
+
+```typescript
+// src/config.ts — Single source of truth for runtime configuration
+export const FACILITATOR_URL = import.meta.env.VITE_FACILITATOR_URL
+  || import.meta.env.VITE_API_URL || '/api';
+export const API_BASE = import.meta.env.VITE_API_URL || '/api';
+export const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+```
+
+The `FACILITATOR_ENABLED` guard prevents API calls when no facilitator URL is configured — all API functions in `lib/api.ts` return empty results instead of failing.
+
+### 8.3 WASM Avoidance Patterns
+
+The frontend avoids importing `@provablehq/sdk` at module parse time to prevent WASM initialization issues:
+
+1. **Mirrored types:** Enums and interfaces (`ServiceType`, `Tier`, `AgentListing`, etc.) are re-declared locally in `stores/agentStore.ts` rather than imported from the SDK.
+2. **Lazy loading:** `@provablehq/wasm` is excluded from Vite's `optimizeDeps.exclude`. The SDK client is created on-demand via `sdkStore.initializeClient()`, not at import time.
+3. **Dynamic imports:** `WalletProvider.tsx` uses `await import('@provablehq/sdk')` inside async functions rather than top-level imports.
+
+### 8.4 SDK Store Health Checks
 
 On app load, `sdkStore.initializeClient()` creates the SDK client. A 30-second interval runs `checkHealth()` to monitor facilitator availability.
 
@@ -527,6 +597,10 @@ Client submits rating (1-5 stars)
 | `register_agent` | `at1hr25c...qzgp` | Confirmed |
 | `create_escrow` | `at197amq...efpp` | Confirmed |
 | `submit_rating` | `at1qv5p2...agqv` | Confirmed |
+| `transfer_public` (manual tx) | `at1yatm4...d9a6l` | Confirmed |
+| `transfer_public` (SDK fix) | `at1wepwc...g30ke` | Confirmed |
+| `transfer_public` (E2E test) | `at1f9exl...s6ukw` | Confirmed |
+| `transfer_public` (full suite) | `at1ds7vz...dy3pj6` | Confirmed |
 
 ### 10.3 On-Chain State
 

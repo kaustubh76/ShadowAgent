@@ -100,11 +100,12 @@
 │  ├── Batch operations for high-volume agents                   │
 │  └── Caching strategies for repeated proofs                    │
 │                                                                  │
-│  Feature Completion                                             │
-│  ├── Dispute resolution mechanism                              │
-│  ├── Partial refund support                                    │
-│  ├── Multi-signature escrow options                            │
-│  └── Reputation decay/freshness indicators                     │
+│  Feature Completion (✓ = IMPLEMENTED in Phase 10a)              │
+│  ├── ✓ Dispute resolution mechanism (shadow_agent_ext.aleo)    │
+│  ├── ✓ Partial refund support (shadow_agent_ext.aleo)          │
+│  ├── ✓ Multi-signature escrow options (shadow_agent_ext.aleo)  │
+│  ├── ✓ Reputation decay/freshness indicators (ext + SDK)       │
+│  └── Remaining: automated arbitration, DAO governance          │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -328,7 +329,7 @@ transition create_escrow_multi(
 
 ### 3.2.2 Session-Based Payments (Critical Priority)
 
-> **Implementation Status:** The core session-based payment system (`create_session`, `session_request`, `settle_session`, `close_session`, `pause_session`, `resume_session`) is **already implemented** in the MVP smart contract -- see [01_Smart_Contract_Implementation.md](01_Smart_Contract_Implementation.md) Section 9 and [Phase 5 of the 10-Phase Plan](00_Project_Overview_10_Phase_Plan.md). This section describes **production-scale enhancements** including multi-token sessions, tiered authorization, and optimized batch settlement.
+> **Implementation Status:** The core session-based payment system (8 transitions: `create_session`, `session_request`, `settle_session`, `close_session`, `pause_session`, `resume_session`, `create_policy`, `create_session_from_policy`) is **implemented** in a **separate companion contract** `shadow_agent_session.aleo` (in the `shadow_agent_session/` directory) -- see [01_Smart_Contract_Implementation.md](01_Smart_Contract_Implementation.md) Section 9 and [Phase 5 of the 10-Phase Plan](00_Project_Overview_10_Phase_Plan.md). This section describes **production-scale enhancements** including multi-token sessions, tiered authorization, and optimized batch settlement.
 
 **Problem Statement:** The x402 micropayment model has a fundamental UX issue at scale: 1000 API calls = 1000 wallet signatures. This makes high-frequency AI agent interactions impractical for real-world usage.
 
@@ -597,6 +598,8 @@ transition prove_consistent_quality(
 ```
 
 ### 3.2.4 Dispute Resolution System
+
+> **Implementation Status:** Basic dispute resolution (open → respond → resolve with percentage split) is **already implemented** in `shadow_agent_ext.aleo` (Phase 10a) with facilitator routes at `/disputes`. The flow below describes **future enhancements** including automated arbitration and DAO governance voting.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

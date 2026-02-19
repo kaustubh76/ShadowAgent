@@ -699,7 +699,37 @@ leo run register_agent 1u8 123field 10000000u64
 
 > **10-Phase Plan Mapping:** This section corresponds to **Phase 5 (Session-Based Payments)** in the [10-Phase Master Plan](00_Project_Overview_10_Phase_Plan.md). The "Phase 7" label here refers to the internal smart contract implementation order, not the project-level phase numbering.
 
+> **Separate Contract:** Session-based payments are implemented as a **separate companion contract** `shadow_agent_session.aleo` (in the `shadow_agent_session/` directory), NOT as part of the core `shadow_agent.aleo`. The session contract has 8 transitions, 1 mapping, and 3 records.
+
 Session-based payments solve the micropayment UX problem: "1000 API calls = 1000 wallet signatures" becomes "1 signature, unlimited requests within bounds."
+
+### 9.0 Session Contract Constants and Mapping
+
+```leo
+program shadow_agent_session.aleo {
+    // Constants
+    const RATE_WINDOW_BLOCKS: u64 = 100u64;    // ~10 minutes at 6s/block
+    const STATUS_ACTIVE: u8 = 0u8;
+    const STATUS_PAUSED: u8 = 1u8;
+    const STATUS_CLOSED: u8 = 2u8;
+    const BLOCK_TOLERANCE: u64 = 10u64;        // Allowed delta for claimed block height
+
+    // Hash input structs (BHP256 does NOT accept tuples)
+    struct SessionIdInput {
+        caller: address,
+        agent: address,
+        current_blk: u64,
+    }
+
+    struct PolicyIdInput {
+        caller: address,
+        current_blk: u64,
+    }
+
+    // Mapping
+    mapping active_sessions: field => bool;     // Track active session IDs
+}
+```
 
 ### 9.1 Session Records
 
@@ -997,11 +1027,60 @@ Session-based payments solve the micropayment UX problem: "1000 API calls = 1000
 | `close_session` | Client | End session, get refund | Yes |
 | `pause_session` | Client | Temporarily disable | Yes |
 | `resume_session` | Client | Re-enable paused session | Yes |
+| `create_policy` | Client | Create reusable spending policy template | Yes |
+| `create_session_from_policy` | Client | Create session bounded by existing policy | Yes |
 
 **Key Insight:** The `session_request` transition requires no client signature because the session record itself IS the authorization. The agent validates bounds locally, then submits the transition. This enables:
 - 1000 API calls with 1 signature (create_session)
 - Off-chain validation for instant responses
 - Batch settlement for gas efficiency
+
+### 9.8 Policy Management
+
+```leo
+    // Create reusable spending policy
+    transition create_policy(
+        private max_session_value: u64,
+        private max_single_request: u64,
+        private allowed_tiers: u8,
+        private allowed_categories: u64,
+        private require_proofs: bool,
+        private current_block: u64,
+    ) -> SpendingPolicy {
+        let input: PolicyIdInput = PolicyIdInput {
+            caller: self.caller,
+            current_blk: current_block,
+        };
+        let policy_id: field = BHP256::hash_to_field(input);
+
+        return SpendingPolicy {
+            owner: self.caller,
+            policy_id: policy_id,
+            max_session_value: max_session_value,
+            max_single_request: max_single_request,
+            allowed_tiers: allowed_tiers,
+            allowed_categories: allowed_categories,
+            require_proofs: require_proofs,
+            created_at: current_block,
+        };
+    }
+
+    // Create session bounded by policy constraints
+    transition create_session_from_policy(
+        private policy: SpendingPolicy,
+        private agent: address,
+        private max_total: u64,
+        private max_per_request: u64,
+        private rate_limit: u64,
+        private duration_blocks: u64,
+        private current_block: u64,
+    ) -> (PaymentSession, SpendingPolicy) then finalize(/* session_id, current_block */) {
+        // Validate session params against policy bounds
+        assert(max_total <= policy.max_session_value);
+        assert(max_per_request <= policy.max_single_request);
+        // ... creates session + returns policy for reuse
+    }
+```
 
 ---
 

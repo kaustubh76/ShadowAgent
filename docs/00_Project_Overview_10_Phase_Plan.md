@@ -25,7 +25,7 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 | 2 | Core On-Chain Transitions | Completed | `01_Smart_Contract_Implementation.md` |
 | 3 | ZK Proof System | Completed | `01_Smart_Contract_Implementation.md` |
 | 4 | Escrow & Payment System | Completed | `01_Smart_Contract_Implementation.md` |
-| 5 | Session-Based Payments | Designed (not deployed) | `01_Smart_Contract_Implementation.md` |
+| 5 | Session-Based Payments | Completed (code complete, pending deployment) | `01_Smart_Contract_Implementation.md` |
 | 6 | Facilitator Service | Completed | `02_Facilitator_Implementation.md` |
 | 7 | SDK Development | Completed | `03_SDK_Implementation.md` |
 | 8 | Frontend Application | Completed | `04_Frontend_Implementation.md` |
@@ -63,10 +63,12 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 │   FACILITATOR (Express.js)                          ALEO BLOCKCHAIN          │
 │   ├── Routes: /agents, /verify,                     ├── shadow_agent.aleo   │
 │   │   /disputes, /refunds,                          │   (12 transitions)    │
-│   │   /escrows/multisig                             ├── shadow_agent_ext.aleo│
-│   └── Cache: Agent directory                        │   (11 transitions)    │
-│         │                                           ├── 4 mappings          │
-│         │                                           └── 9 records           │
+│   │   /escrows/multisig,                            ├── shadow_agent_ext.aleo│
+│   │   /sessions                                     │   (11 transitions)    │
+│   └── Cache: Agent directory                        ├── shadow_agent_session │
+│         │                                           │   .aleo (8 transitions)│
+│         │                                           ├── 5 mappings          │
+│         │                                           └── 12 records          │
 │         │                                                     ▲              │
 │         └──── Reads On-Chain State ───────────────────────────┘              │
 │                                                                              │
@@ -99,9 +101,9 @@ ShadowAgent is a privacy-preserving marketplace for AI agent services built on t
 | `ReputationProof` | ZK proof of reputation | `proof_type`, `threshold_met`, `tier_proven` | Deployed |
 | `EscrowRecord` | HTLC escrow payment | `agent`, `amount`, `job_hash`, `deadline`, `secret_hash`, `status` | Deployed |
 | `PublicListing` | Agent's public marketplace listing | `agent_id`, `service_type`, `endpoint_hash`, `min_tier`, `is_active` | Deployed |
-| `PaymentSession` | Pre-authorized spending session | `max_total`, `max_per_request`, `rate_limit`, `spent`, `valid_until` | Designed, not deployed |
-| `SpendingPolicy` | Reusable authorization rules | `max_session_value`, `allowed_tiers`, `allowed_categories`, `require_proofs` | Designed, not deployed |
-| `SessionReceipt` | Per-request settlement receipt | `session_id`, `request_hash`, `amount`, `agent_signature` | Designed, not deployed |
+| `PaymentSession` | Pre-authorized spending session | `max_total`, `max_per_request`, `rate_limit`, `spent`, `valid_until` | Code complete (`shadow_agent_session.aleo`) |
+| `SpendingPolicy` | Reusable authorization rules | `max_session_value`, `allowed_tiers`, `allowed_categories`, `require_proofs` | Code complete (`shadow_agent_session.aleo`) |
+| `SessionReceipt` | Per-request settlement receipt | `session_id`, `request_hash`, `amount`, `timestamp` | Code complete (`shadow_agent_session.aleo`) |
 
 **Economic Constants:**
 
@@ -298,9 +300,9 @@ Client                      Agent Service               Blockchain
 
 ## Phase 5: Session-Based Payments
 
-**Status:** Designed (not deployed)
+**Status:** Completed (code complete, pending deployment)
 
-> **Important:** The 6 session transitions described below are fully specified in the documentation but are **not present in the deployed `shadow_agent.aleo` contract**. The deployed contract contains 12 core transitions (Phases 1-4). Session-based payments will be implemented in a future deployment.
+> **Note:** Session-based payments are implemented as a **separate companion contract** `shadow_agent_session.aleo` (in the `shadow_agent_session/` directory) with 8 transitions, rather than being part of the core `shadow_agent.aleo`. The contract code is complete and tested but awaiting deployment to Aleo Testnet.
 
 **Objective:** Solve the fundamental x402 UX problem (1000 API calls = 1000 wallet signatures) by enabling "sign once, spend within bounds" sessions for high-frequency AI agent interactions.
 
@@ -316,6 +318,8 @@ Client                      Agent Service               Blockchain
 | `close_session` | 1 (client) | Close session, refund unused funds (max_total - spent) |
 | `pause_session` | 1 (client) | Temporarily suspend session (can be resumed) |
 | `resume_session` | 1 (client) | Reactivate a paused session |
+| `create_policy` | 1 (client) | Create reusable spending policy template |
+| `create_session_from_policy` | 1 (client) | Create session bounded by an existing policy |
 
 **Session Bounds:**
 
@@ -340,7 +344,7 @@ Client                      Agent Service               Blockchain
 - 1000 requests = **1 settlement TX** (vs 1000 individual TXs)
 - Session activity stays **off-chain** until settlement (additional privacy)
 
-> **Note:** Session payments are fully designed (Doc 01, Section 9) but **not yet deployed on-chain**. The deployed `shadow_agent.aleo` contract contains 12 core transitions (Phases 1-4). Session transitions will be added in a future contract deployment. The Future Implementation Plan (Doc 06, Section 3.2.2) covers production-scale enhancements.
+**Contract:** `shadow_agent_session.aleo` (separate companion contract in `shadow_agent_session/` directory)
 
 **Reference:** [01_Smart_Contract_Implementation.md](01_Smart_Contract_Implementation.md) -- Section 9 (Session-Based Payments), [06_Future_Implementation_Plan.md](06_Future_Implementation_Plan.md) -- Section 3.2.2 (Production Enhancements)
 
@@ -366,6 +370,10 @@ Client                      Agent Service               Blockchain
 | `/verify/reputation` | POST | Verify a reputation proof (proof, proof_type, threshold) |
 | `/health` | GET | Basic health check (status, timestamp) |
 | `/health/ready` | GET | Readiness check (Aleo connection + block height) |
+| `/disputes` | POST/GET | Open disputes, get status, respond, resolve (Phase 10a) |
+| `/refunds` | POST/GET | Propose/accept/reject partial refunds (Phase 10a) |
+| `/escrows/multisig` | POST/GET | Create/approve multi-sig escrows (Phase 10a) |
+| `/sessions` | POST/GET | Create/manage sessions, policies, pause/resume (Phase 5) |
 
 **Services:**
 - **Aleo Service:** Blockchain client for mapping queries, block height, transaction verification
@@ -764,7 +772,7 @@ Phase 10a implements four feature groups as a companion contract (`shadow_agent_
 | `05_Testing_Implementation.md` | 9 | Unit/integration/E2E tests, CI/CD, coverage |
 | `06_Future_Implementation_Plan.md` | 10 | 5 future sub-phases, business model, GTM, partnerships, KPIs |
 | `07_Technical_Flow_Diagrams.md` | 2, 3, 4, 5 | Registration, x402, escrow, rating, session, proof flows |
-| `Deployment_Status.md` | 2, 10a | On-chain TX IDs, mappings, contract functions (core + extension), network config |
+| `Deployment_Status.md` | 2, 5, 10a | On-chain TX IDs, mappings, contract functions (core + extension + session), network config |
 
 ---
 
@@ -823,6 +831,25 @@ Phase 10a implements four feature groups as a companion contract (`shadow_agent_
 | `approve_escrow_release` | Private |
 | `refund_multisig_escrow` | Private + Finalize |
 
+### Session Contract (Phase 5)
+
+**Contract:** `shadow_agent_session.aleo` (code complete, pending deployment)
+
+**Source:** `shadow_agent_session/src/main.leo`
+
+**Session Contract Functions (8):**
+
+| Function | Type |
+|----------|------|
+| `create_session` | Async + Finalize |
+| `session_request` | Async + Finalize |
+| `settle_session` | Private |
+| `close_session` | Async + Finalize |
+| `pause_session` | Private |
+| `resume_session` | Private |
+| `create_policy` | Private |
+| `create_session_from_policy` | Async + Finalize |
+
 ### Network Configuration
 
 | Setting | Value |
@@ -831,7 +858,7 @@ Phase 10a implements four feature groups as a companion contract (`shadow_agent_
 | RPC | `https://api.explorer.provable.com/v1` |
 | Explorer | `https://explorer.aleo.org` |
 
-**Total on-chain:** 23 transitions, 4 mappings, 9 records across 2 deployed contracts.
+**Total on-chain:** 31 transitions (12 core + 11 extension + 8 session), 5 mappings, 12 records across 3 contracts (2 deployed + 1 pending deployment).
 
 ---
 
