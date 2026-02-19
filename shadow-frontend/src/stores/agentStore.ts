@@ -267,6 +267,7 @@ export const useAgentStore = create<AgentState>()(
         agentId: state.agentId,
         reputation: state.reputation,
         filters: state.filters,
+        transactions: state.transactions,
       }),
     }
   )
