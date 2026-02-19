@@ -493,9 +493,10 @@ export async function transferPublic(
 ): Promise<string> {
   await ensureThreadPool();
 
-  const { Account, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
+  const { Account, PrivateKey, ProgramManager, AleoNetworkClient, AleoKeyProvider, NetworkRecordProvider } = await getSDK();
   const account = new Account({ privateKey: privateKeyStr });
   const senderAddress = account.address().to_string();
+  const privKey = PrivateKey.from_string(privateKeyStr);
 
   // Check balance first
   const balance = await getBalance(senderAddress);
@@ -513,7 +514,6 @@ export async function transferPublic(
   keyProvider.useCache(true);
   const recordProvider = new NetworkRecordProvider(account, networkClient);
 
-  // Initialize ProgramManager with proper providers
   const programManager = new ProgramManager(
     ALEO_API_BASE,
     keyProvider,
@@ -521,16 +521,36 @@ export async function transferPublic(
   );
   programManager.setAccount(account);
 
-  // Execute transfer_public
-  const txResult = await programManager.transfer(
-    amount,
-    recipientAddress,
-    'transfer_public',
-    fee,
-    false // don't use private fee record
-  );
+  // Manual transaction building — bypasses SDK's broken base fee floor
+  const authorization = await programManager.buildAuthorization({
+    programName: 'credits.aleo',
+    functionName: 'transfer_public',
+    privateKey: privKey,
+    inputs: [recipientAddress, `${amount}u64`],
+  });
 
-  return typeof txResult === 'string' ? txResult : JSON.stringify(txResult);
+  const executionId = authorization.toExecutionId().toString();
+  const baseFeeMicrocredits = await programManager.estimateFeeForAuthorization({
+    authorization,
+    programName: 'credits.aleo',
+  });
+  const baseFeeCredits = Number(baseFeeMicrocredits) / 1_000_000;
+
+  const feeAuthorization = await programManager.buildFeeAuthorization({
+    deploymentOrExecutionId: executionId,
+    baseFeeCredits,
+    priorityFeeCredits: fee / 1_000_000,
+    privateKey: privKey,
+  });
+
+  const tx = await programManager.buildTransactionFromAuthorization({
+    programName: 'credits.aleo',
+    authorization,
+    feeAuthorization,
+  });
+
+  const txId = await networkClient.submitTransaction(tx.toString());
+  return typeof txId === 'string' ? txId : tx.id();
 }
 
 /**
