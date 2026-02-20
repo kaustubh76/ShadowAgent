@@ -77,7 +77,10 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   for (let i = 0; i <= retries; i++) {
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, {
+        ...options,
+        signal: options?.signal ?? AbortSignal.timeout(15_000),
+      });
 
       // Retry on 429 with Retry-After backoff
       if (response.status === 429 && i < retries) {

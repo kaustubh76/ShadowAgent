@@ -19,5 +19,5 @@ services:
       - key: LOG_LEVEL
         value: info
       - key: CORS_ORIGIN
-        value: "*"
+        value: "https://shadowagent-five.vercel.app"
     healthCheckPath: /health

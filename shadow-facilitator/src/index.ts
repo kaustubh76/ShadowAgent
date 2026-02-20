@@ -19,10 +19,11 @@ import { x402Middleware } from './middleware/x402';
 import { createGlobalRateLimiter } from './middleware/rateLimiter';
 import { indexerService } from './services/indexer';
 import { getRedisService } from './services/redis';
-import { config } from './config';
+import { config, validateConfig } from './config';
 import { installShutdownHandlers, onShutdown } from './utils/shutdown';
 
 dotenv.config();
+validateConfig();
 
 // Validate required environment variables
 function validateEnv() {
@@ -64,8 +65,12 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(helmet());
+const corsOriginEnv = process.env.CORS_ORIGIN;
+const corsOrigin = !corsOriginEnv || corsOriginEnv === '*'
+  ? '*'
+  : corsOriginEnv.split(',').map(s => s.trim());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Escrow-Proof', 'X-Job-Hash'],
   exposedHeaders: [
@@ -149,10 +154,12 @@ app.get('/api/example', (req, res) => {
 });
 
 // Error handler
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error('Unhandled error', { error: err.message, stack: err.stack });
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const requestId = (req as express.Request & { id?: string }).id;
+  logger.error('Unhandled error', { error: err.message, stack: err.stack, requestId });
   res.status(500).json({
     error: 'Internal server error',
+    request_id: requestId,
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
   });
 });
@@ -165,8 +172,8 @@ app.use((req, res) => {
 // Install graceful shutdown handlers (SIGTERM, SIGINT)
 installShutdownHandlers();
 
-// Start server
-const server = app.listen(PORT, async () => {
+// Start server — bind to 0.0.0.0 so Render/Docker can route external traffic
+const server = app.listen(Number(PORT), '0.0.0.0', async () => {
   logger.info(`ShadowAgent Facilitator running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Network: ${process.env.ALEO_NETWORK || 'testnet'}`);
@@ -176,6 +183,15 @@ const server = app.listen(PORT, async () => {
   // Log environment warnings
   for (const warning of envWarnings) {
     logger.warn(warning);
+  }
+
+  // Check Redis connectivity (non-blocking)
+  const redis = getRedisService();
+  try {
+    await redis.connect();
+    logger.info('Redis: connected');
+  } catch {
+    logger.warn('Redis: unavailable, using in-memory fallback');
   }
 
   // Start background indexer
