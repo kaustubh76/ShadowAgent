@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, User, Users, Menu, X, AlertTriangle, Clock } from 'lucide-react';
+import { Shield, User, Users, Menu, X, AlertTriangle, Clock, Briefcase } from 'lucide-react';
 import ConnectWallet from './ConnectWallet';
+import { useAgentStore } from '../stores/agentStore';
 import clsx from 'clsx';
 
 export default function Header() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const pendingCount = useAgentStore(s => s.pendingEscrows.length);
 
   const navItems = [
     { path: '/', label: 'Home', icon: Shield },
     { path: '/client', label: 'Find Agents', icon: Users },
+    { path: '/jobs', label: 'Jobs', icon: Briefcase },
     { path: '/agent', label: 'Agent Dashboard', icon: User },
     { path: '/disputes', label: 'Disputes', icon: AlertTriangle },
     { path: '/activity', label: 'Activity', icon: Clock },
@@ -74,6 +77,11 @@ export default function Header() {
                   >
                     <Icon className="w-4 h-4" />
                     <span>{item.label}</span>
+                    {item.path === '/agent' && pendingCount > 0 && (
+                      <span className="w-4 h-4 rounded-full bg-shadow-500 text-white text-[9px] font-bold flex items-center justify-center animate-scale-in">
+                        {pendingCount}
+                      </span>
+                    )}
                     {isActive && (
                       <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-shadow-500 rounded-full" />
                     )}
@@ -130,6 +138,11 @@ export default function Header() {
                 >
                   <Icon className="w-5 h-5" />
                   <span className="font-medium">{item.label}</span>
+                  {item.path === '/agent' && pendingCount > 0 && (
+                    <span className="w-5 h-5 rounded-full bg-shadow-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {pendingCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

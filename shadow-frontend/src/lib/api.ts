@@ -2,7 +2,7 @@
 // Uses SDK client when available, falls back to direct fetch
 
 import { useSDKStore } from '../stores/sdkStore';
-import type { AgentListing, SearchFilters, DisputeInfo, RefundInfo } from '../stores/agentStore';
+import type { AgentListing, SearchFilters, DisputeInfo, RefundInfo, JobInfo } from '../stores/agentStore';
 
 // Local type definitions (mirrors SDK to avoid WASM import chain)
 interface SearchParams {
@@ -29,7 +29,7 @@ interface VerificationResult {
 import { API_BASE, FACILITATOR_ENABLED } from '../config';
 
 // Multi-sig escrow type
-interface MultiSigEscrowData {
+export interface MultiSigEscrowData {
   owner: string;
   agent: string;
   amount: number;
@@ -821,5 +821,327 @@ export async function createSessionFromPolicy(
     return { success: true, session: body.session, policy_id: body.policy_id };
   } catch {
     return { success: false, error: 'Network error creating session from policy' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Missing Backend Endpoints
+// ═══════════════════════════════════════════════════════════════════
+
+// Submit a spending request within an active session
+export async function sessionRequest(
+  sessionId: string,
+  amount: number,
+  requestHash?: string
+): Promise<{ success: boolean; session?: SessionInfo; receipt?: { request_hash: string; amount: number; timestamp: string }; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, request_hash: requestHash }),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to submit session request' };
+    }
+
+    return { success: true, session: body.session, receipt: body.receipt };
+  } catch {
+    return { success: false, error: 'Network error submitting session request' };
+  }
+}
+
+// Settle accumulated session payments
+export async function settleSession(
+  sessionId: string,
+  settlementAmount: number
+): Promise<{ success: boolean; session?: SessionInfo; settlement?: { amount: number; settled_at: string }; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}/settle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settlement_amount: settlementAmount }),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to settle session' };
+    }
+
+    return { success: true, session: body.session, settlement: body.settlement };
+  } catch {
+    return { success: false, error: 'Network error settling session' };
+  }
+}
+
+// Resolve a dispute (admin only)
+export async function resolveDispute(
+  jobHash: string,
+  agentPercentage: number
+): Promise<{ success: boolean; dispute?: DisputeInfo; settlement?: { agent_amount: number; client_amount: number }; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/disputes/${jobHash}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_percentage: agentPercentage }),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to resolve dispute' };
+    }
+
+    return { success: true, dispute: body.dispute, settlement: body.settlement };
+  } catch {
+    return { success: false, error: 'Network error resolving dispute' };
+  }
+}
+
+// Get agent by wallet address
+export async function getAgentByAddress(
+  publicKey: string
+): Promise<Record<string, unknown> | null> {
+  if (!FACILITATOR_ENABLED) return null;
+
+  try {
+    const url = `${API_BASE}/agents/by-address/${publicKey}`;
+    const cached = getCached<Record<string, unknown>>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return null;
+    const result = await response.json();
+    setCache(url, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+// Get multi-sig escrows pending user's approval
+export async function getPendingEscrows(
+  address: string
+): Promise<MultiSigEscrowData[]> {
+  if (!FACILITATOR_ENABLED) return [];
+
+  try {
+    const url = `${API_BASE}/escrows/multisig/pending/${address}`;
+    const cached = getCached<MultiSigEscrowData[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return [];
+    const result = await response.json();
+    setCache(url, result);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// Verify escrow proof
+export async function verifyEscrowProof(
+  proof: string
+): Promise<{ valid: boolean; error?: string; verified_at?: string }> {
+  if (!FACILITATOR_ENABLED) return { valid: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/verify/escrow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proof }),
+    });
+
+    return await response.json();
+  } catch {
+    return { valid: false, error: 'Network error verifying escrow proof' };
+  }
+}
+
+// Check if nullifier has been used
+export async function verifyNullifier(
+  nullifier: string
+): Promise<{ nullifier: string; is_used: boolean; checked_at?: string; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { nullifier, is_used: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/verify/nullifier`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nullifier }),
+    });
+
+    return await response.json();
+  } catch {
+    return { nullifier, is_used: false, error: 'Network error verifying nullifier' };
+  }
+}
+
+// Get agent's reputation proof metadata
+export async function getAgentProof(
+  agentId: string
+): Promise<Record<string, unknown> | null> {
+  if (!FACILITATOR_ENABLED) return null;
+
+  try {
+    const url = `${API_BASE}/agents/${agentId}/proof`;
+    const cached = getCached<Record<string, unknown>>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return null;
+    const result = await response.json();
+    setCache(url, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+// Get detailed system health status
+export interface HealthDetailed {
+  status: string;
+  timestamp: string;
+  version: string;
+  startedAt: string;
+  subsystems: {
+    aleo_rpc: { circuit_breaker: string; failure_count: number; last_failure: string | null };
+    indexer: { cached_agents: number; tracked_agents: number; cache_hit_rate: number; total_fetches: number; last_index_time: string | null };
+    redis: { connected: boolean };
+    hash_ring: { node_count: number; distribution: Record<string, number> };
+  };
+}
+
+export async function getHealthDetailed(): Promise<HealthDetailed | null> {
+  if (!FACILITATOR_ENABLED) return null;
+
+  try {
+    const response = await fetchWithRetry(`${API_BASE}/health/detailed`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Jobs: Escrow-Backed Job Listings
+// ═══════════════════════════════════════════════════════════════════
+
+// Create a new escrow-backed job
+export async function createJob(data: {
+  agent: string;
+  client: string;
+  title: string;
+  description: string;
+  service_type: number;
+  pricing: number;
+  escrow_amount: number;
+  secret_hash: string;
+  multisig_enabled?: boolean;
+  signers?: [string, string, string];
+  required_signatures?: number;
+}): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to create job' };
+    }
+
+    return { success: true, job: body.job };
+  } catch {
+    return { success: false, error: 'Network error creating job' };
+  }
+}
+
+// List jobs with optional filters
+export async function fetchJobs(
+  params?: { agent?: string; client?: string; status?: string; service_type?: number }
+): Promise<JobInfo[]> {
+  if (!FACILITATOR_ENABLED) return [];
+
+  try {
+    const searchParams = new URLSearchParams();
+    if (params?.agent) searchParams.set('agent', params.agent);
+    if (params?.client) searchParams.set('client', params.client);
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.service_type) searchParams.set('service_type', String(params.service_type));
+
+    const qs = searchParams.toString();
+    const url = `${API_BASE}/jobs${qs ? `?${qs}` : ''}`;
+    const cached = getCached<JobInfo[]>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return [];
+    const result = await response.json();
+    setCache(url, result);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// Get a specific job
+export async function getJob(jobId: string): Promise<JobInfo | null> {
+  if (!FACILITATOR_ENABLED) return null;
+
+  try {
+    const url = `${API_BASE}/jobs/${jobId}`;
+    const cached = getCached<JobInfo>(url);
+    if (cached) return cached;
+
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return null;
+    const result = await response.json();
+    setCache(url, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+// Update job status
+export async function updateJobStatus(
+  jobId: string,
+  updates: { status?: string; escrow_status?: string }
+): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
+  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
+
+  try {
+    const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+
+    const body = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: body.error || 'Failed to update job' };
+    }
+
+    return { success: true, job: body.job };
+  } catch {
+    return { success: false, error: 'Network error updating job' };
   }
 }

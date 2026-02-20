@@ -14,6 +14,8 @@ import MultiSigEscrowForm from '../components/MultiSigEscrowForm';
 import MultiSigApprovalPanel from '../components/MultiSigApprovalPanel';
 import RatingForm from '../components/RatingForm';
 import SessionManager from '../components/SessionManager';
+import AgentJobsList from '../components/AgentJobsList';
+import type { JobInfo } from '../stores/agentStore';
 import { useToast } from '../contexts/ToastContext';
 
 const privacyChecks = [
@@ -143,11 +145,13 @@ function ReputationProofModal({
 function RequestServiceModal({
   agent,
   onClose,
+  initialAmount = '0.01',
 }: {
   agent: AgentListing;
   onClose: () => void;
+  initialAmount?: string;
 }) {
-  const [amount, setAmount] = useState('0.01'); // Default to 0.01 credits for testing
+  const [amount, setAmount] = useState(initialAmount);
   const { createEscrow, isLoading, status: escrowStatus } = useEscrowTransaction();
   const { formattedBalance, checkBalance } = useBalanceCheck();
   const [localStatus, setLocalStatus] = useState<string | null>(null);
@@ -177,6 +181,7 @@ function RequestServiceModal({
 
     if (result.success) {
       setLocalStatus(`Escrow created! TX: ${result.txId?.slice(0, 16)}...`);
+      useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: agent.agent_id, amount: microcredits });
     } else {
       setLocalStatus(`Error: ${result.error}`);
     }
@@ -298,6 +303,7 @@ export default function AgentDetails() {
   const [showMultiSigForm, setShowMultiSigForm] = useState(false);
   const [showRatingForm, setShowRatingForm] = useState(false);
   const [showSessionManager, setShowSessionManager] = useState(false);
+  const [initialAmount, setInitialAmount] = useState('0.01');
   const [multiSigData, setMultiSigData] = useState<{
     jobHash: string;
     signers: [string, string, string];
@@ -494,6 +500,17 @@ export default function AgentDetails() {
         </div>
       </div>
 
+      {/* Agent's Open Jobs */}
+      {agent.is_active && connected && (
+        <AgentJobsList
+          agentAddress={agent.agent_id}
+          onAcceptJob={(job: JobInfo) => {
+            setInitialAmount((job.pricing / 1_000_000).toFixed(2));
+            setShowRequestModal(true);
+          }}
+        />
+      )}
+
       {/* Action Card */}
       <div
         className="card opacity-0 animate-fade-in-up"
@@ -636,7 +653,7 @@ export default function AgentDetails() {
         <ReputationProofModal agent={agent} onClose={() => setShowProofModal(false)} />
       )}
       {showRequestModal && (
-        <RequestServiceModal agent={agent} onClose={() => setShowRequestModal(false)} />
+        <RequestServiceModal agent={agent} onClose={() => setShowRequestModal(false)} initialAmount={initialAmount} />
       )}
       {showDisputeForm && (
         <DisputeForm
@@ -708,6 +725,7 @@ export default function AgentDetails() {
             });
             if (result.success && result.escrow) {
               toast.success('Multi-sig escrow created');
+              useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: agent.agent_id, amount: 10_000_000 });
               setMultiSigData({
                 jobHash: result.escrow.job_hash,
                 signers: result.escrow.signers,

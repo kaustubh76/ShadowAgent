@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Zap, X } from 'lucide-react';
-import { useAgentStore } from '../stores/agentStore';
+import { useAgentStore, type SessionInfo } from '../stores/agentStore';
 import { listSessions, closeSession, pauseSession, resumeSession, listPolicies } from '../lib/api';
 import { useWalletStore } from '../stores/walletStore';
 import CreateSessionForm from './session/CreateSessionForm';
 import SessionList from './session/SessionList';
 import PolicyManager from './session/PolicyManager';
+import SessionRequestModal from './session/SessionRequestModal';
+import SessionSettleModal from './session/SessionSettleModal';
 
 interface SessionManagerProps {
   isOpen: boolean;
@@ -17,6 +19,8 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
   const { address } = useWalletStore();
   const { sessions, setSessions, updateSession, addTransaction, setPolicies, policies } = useAgentStore();
   const [tab, setTab] = useState<'create' | 'active' | 'policies'>('active');
+  const [requestSession, setRequestSession] = useState<SessionInfo | null>(null);
+  const [settleSession, setSettleSession] = useState<SessionInfo | null>(null);
 
   // Load sessions and policies for this agent on open
   useEffect(() => {
@@ -111,6 +115,26 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
             onClose={handleClose}
             onCreateClick={() => setTab('create')}
             closedCount={closedCount}
+            onRequest={(session) => setRequestSession(session)}
+            onSettle={(session) => setSettleSession(session)}
+          />
+        )}
+
+        {/* Session Request Modal */}
+        {requestSession && (
+          <SessionRequestModal
+            isOpen={!!requestSession}
+            onClose={() => setRequestSession(null)}
+            session={requestSession}
+          />
+        )}
+
+        {/* Session Settle Modal */}
+        {settleSession && (
+          <SessionSettleModal
+            isOpen={!!settleSession}
+            onClose={() => setSettleSession(null)}
+            session={settleSession}
           />
         )}
       </div>

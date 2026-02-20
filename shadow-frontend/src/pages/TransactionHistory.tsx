@@ -2,14 +2,17 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Clock, Lock, CheckCircle, Star, AlertTriangle, Scale,
-  ArrowLeftRight, ThumbsUp, Zap, XCircle, type LucideIcon,
+  ArrowLeftRight, ThumbsUp, Zap, XCircle, Send, Banknote,
+  Briefcase, Play, type LucideIcon,
 } from 'lucide-react';
 import { useAgentStore } from '../stores/agentStore';
 import { timeAgo } from '../utils/timeAgo';
 
 type TxType = 'escrow_created' | 'escrow_claimed' | 'rating_submitted'
   | 'dispute_opened' | 'dispute_resolved' | 'partial_refund_proposed'
-  | 'partial_refund_accepted' | 'session_created' | 'session_closed';
+  | 'partial_refund_accepted' | 'session_created' | 'session_closed'
+  | 'session_request' | 'session_settled' | 'job_created'
+  | 'job_started' | 'job_completed' | 'job_cancelled';
 
 const TX_CONFIG: Record<TxType, { label: string; icon: LucideIcon; color: string }> = {
   escrow_created:          { label: 'Escrow Created',   icon: Lock,           color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
@@ -21,14 +24,21 @@ const TX_CONFIG: Record<TxType, { label: string; icon: LucideIcon; color: string
   partial_refund_accepted: { label: 'Refund Accepted',  icon: ThumbsUp,       color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
   session_created:         { label: 'Session Created',  icon: Zap,            color: 'text-shadow-400 bg-shadow-400/10 border-shadow-400/20' },
   session_closed:          { label: 'Session Closed',   icon: XCircle,        color: 'text-gray-400 bg-gray-400/10 border-gray-400/20' },
+  session_request:         { label: 'Session Request',  icon: Send,           color: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' },
+  session_settled:         { label: 'Session Settled',  icon: Banknote,       color: 'text-teal-400 bg-teal-400/10 border-teal-400/20' },
+  job_created:             { label: 'Job Created',      icon: Briefcase,      color: 'text-indigo-400 bg-indigo-400/10 border-indigo-400/20' },
+  job_started:             { label: 'Job Started',      icon: Play,           color: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+  job_completed:           { label: 'Job Completed',    icon: CheckCircle,    color: 'text-green-400 bg-green-400/10 border-green-400/20' },
+  job_cancelled:           { label: 'Job Cancelled',    icon: XCircle,        color: 'text-red-400 bg-red-400/10 border-red-400/20' },
 };
 
 const FILTER_TABS = [
   { key: 'all',     label: 'All' },
   { key: 'escrow',  label: 'Escrows',  types: ['escrow_created', 'escrow_claimed'] },
-  { key: 'session', label: 'Sessions', types: ['session_created', 'session_closed'] },
+  { key: 'session', label: 'Sessions', types: ['session_created', 'session_closed', 'session_request', 'session_settled'] },
   { key: 'dispute', label: 'Disputes', types: ['dispute_opened', 'dispute_resolved', 'partial_refund_proposed', 'partial_refund_accepted'] },
   { key: 'rating',  label: 'Ratings',  types: ['rating_submitted'] },
+  { key: 'job',     label: 'Jobs',     types: ['job_created', 'job_started', 'job_completed', 'job_cancelled'] },
 ] as const;
 
 export default function TransactionHistory() {

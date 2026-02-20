@@ -1,4 +1,4 @@
-import { Zap, Pause, Play, XCircle, Clock, TrendingUp } from 'lucide-react';
+import { Zap, Pause, Play, XCircle, Clock, TrendingUp, Send, DollarSign } from 'lucide-react';
 import { type SessionInfo } from '../../stores/agentStore';
 
 interface SessionListProps {
@@ -8,9 +8,11 @@ interface SessionListProps {
   onClose: (id: string) => void;
   onCreateClick: () => void;
   closedCount: number;
+  onRequest?: (session: SessionInfo) => void;
+  onSettle?: (session: SessionInfo) => void;
 }
 
-export default function SessionList({ activeSessions, onPause, onResume, onClose, onCreateClick, closedCount }: SessionListProps) {
+export default function SessionList({ activeSessions, onPause, onResume, onClose, onCreateClick, closedCount, onRequest, onSettle }: SessionListProps) {
   if (activeSessions.length === 0) {
     return (
       <div className="text-center py-12">
@@ -39,6 +41,8 @@ export default function SessionList({ activeSessions, onPause, onResume, onClose
             onPause={onPause}
             onResume={onResume}
             onClose={onClose}
+            onRequest={onRequest}
+            onSettle={onSettle}
           />
         ))}
       </div>
@@ -59,11 +63,15 @@ function SessionCard({
   onPause,
   onResume,
   onClose,
+  onRequest,
+  onSettle,
 }: {
   session: SessionInfo;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onClose: (id: string) => void;
+  onRequest?: (session: SessionInfo) => void;
+  onSettle?: (session: SessionInfo) => void;
 }) {
   const spentCredits = session.spent / 1_000_000;
   const maxCredits = session.max_total / 1_000_000;
@@ -132,6 +140,30 @@ function SessionCard({
         <Clock className="w-3 h-3" />
         <span>Created {new Date(session.created_at).toLocaleDateString()}</span>
       </div>
+
+      {/* Primary Actions: Request + Settle */}
+      {session.status === 'active' && (onRequest || onSettle) && (
+        <div className="flex gap-2 mb-2">
+          {onRequest && (
+            <button
+              onClick={() => onRequest(session)}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-shadow-500/10 text-shadow-400 text-xs font-medium hover:bg-shadow-500/20 transition-colors border border-shadow-500/20"
+            >
+              <Send className="w-3 h-3" />
+              Make Request
+            </button>
+          )}
+          {onSettle && session.spent > 0 && (
+            <button
+              onClick={() => onSettle(session)}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 transition-colors border border-emerald-500/20"
+            >
+              <DollarSign className="w-3 h-3" />
+              Settle
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2">

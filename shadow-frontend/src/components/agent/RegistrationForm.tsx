@@ -17,7 +17,7 @@ import {
   formatFieldForLeo,
   formatU64ForLeo,
 } from '../../services/aleo';
-import { getServiceTypeName } from '../../stores/agentStore';
+import { getServiceTypeName, useAgentStore } from '../../stores/agentStore';
 import { API_BASE, FACILITATOR_ENABLED } from '../../config';
 
 interface RegistrationFormProps {
@@ -154,6 +154,7 @@ export default function RegistrationForm({ onRegistered }: RegistrationFormProps
       if (confirmed) {
         setTxStatus('Registration confirmed!');
         toast.success(`Agent registered successfully as ${getServiceTypeName(selectedServiceType)} agent!`);
+        useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: publicKey!, amount: bondAmount });
 
         // Notify facilitator (non-blocking)
         if (FACILITATOR_ENABLED) {

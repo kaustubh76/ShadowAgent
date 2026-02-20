@@ -15,6 +15,7 @@ import refundsRouter from './routes/refunds';
 import disputesRouter from './routes/disputes';
 import multisigRouter from './routes/multisig';
 import sessionsRouter from './routes/sessions';
+import jobsRouter from './routes/jobs';
 import { x402Middleware } from './middleware/x402';
 import { createGlobalRateLimiter } from './middleware/rateLimiter';
 import { indexerService } from './services/indexer';
@@ -71,7 +72,7 @@ const corsOrigin = !corsOriginEnv || corsOriginEnv === '*'
   : corsOriginEnv.split(',').map(s => s.trim());
 app.use(cors({
   origin: corsOrigin,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Escrow-Proof', 'X-Job-Hash'],
   exposedHeaders: [
     'X-Delivery-Secret',
@@ -143,6 +144,7 @@ app.use('/refunds', refundsRouter);
 app.use('/disputes', disputesRouter);
 app.use('/escrows/multisig', multisigRouter);
 app.use('/sessions', sessionsRouter);
+app.use('/jobs', jobsRouter);
 
 // x402 protected example endpoint
 app.use('/api', x402Middleware({ pricePerRequest: 100000 }));

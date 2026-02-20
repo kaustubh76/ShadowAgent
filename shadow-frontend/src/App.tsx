@@ -4,6 +4,8 @@ import { Home, AlertTriangle, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react
 import Layout from './components/Layout';
 import { ToastProvider } from './contexts/ToastContext';
 import { useSDKStore } from './stores/sdkStore';
+import { useWalletStore } from './stores/walletStore';
+import { useAgentStore } from './stores/agentStore';
 
 // Lazy-loaded page components for route-level code splitting
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -12,6 +14,7 @@ const ClientDashboard = lazy(() => import('./pages/ClientDashboard'));
 const AgentDetails = lazy(() => import('./pages/AgentDetails'));
 const DisputeCenter = lazy(() => import('./pages/DisputeCenter'));
 const TransactionHistory = lazy(() => import('./pages/TransactionHistory'));
+const JobMarketplace = lazy(() => import('./pages/JobMarketplace'));
 
 // 404 Page
 function NotFound() {
@@ -105,6 +108,8 @@ function App() {
   const { initializeClient } = useSDKStore();
 
   const { checkHealth } = useSDKStore();
+  const { connected, address } = useWalletStore();
+  const { hydrateFromFacilitator } = useAgentStore();
 
   // Initialize SDK client and run first health check once ready
   useEffect(() => {
@@ -118,6 +123,13 @@ function App() {
     }, 30_000);
     return () => clearInterval(interval);
   }, [checkHealth]);
+
+  // Hydrate activity from facilitator when wallet connects
+  useEffect(() => {
+    if (connected && address) {
+      hydrateFromFacilitator(address);
+    }
+  }, [connected, address, hydrateFromFacilitator]);
 
   return (
     <ErrorBoundary>
@@ -133,6 +145,7 @@ function App() {
               <Route path="agent" element={<AgentDashboard />} />
               <Route path="client" element={<ClientDashboard />} />
               <Route path="agents/:agentId" element={<AgentDetails />} />
+              <Route path="jobs" element={<JobMarketplace />} />
               <Route path="disputes" element={<DisputeCenter />} />
               <Route path="activity" element={<TransactionHistory />} />
               <Route path="*" element={<NotFound />} />

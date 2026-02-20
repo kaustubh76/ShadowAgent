@@ -9,6 +9,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useReputationProof, useBalanceCheck } from '../hooks/useTransactions';
 import SkeletonStats from '../components/agent/SkeletonStats';
 import ActiveSessionsPanel from '../components/agent/ActiveSessionsPanel';
+import PendingApprovalsPanel from '../components/agent/PendingApprovalsPanel';
+import JobsPanel from '../components/agent/JobsPanel';
 import RegistrationForm from '../components/agent/RegistrationForm';
 import ReputationPanel from '../components/agent/ReputationPanel';
 import {
@@ -17,7 +19,7 @@ import {
   isAddressRegistered,
 } from '../services/aleo';
 import { getTierName, useAgentStore } from '../stores/agentStore';
-import { listSessions } from '../lib/api';
+import { listSessions, fetchJobs } from '../lib/api';
 
 import { API_BASE, FACILITATOR_ENABLED } from '../config';
 
@@ -36,7 +38,7 @@ export default function AgentDashboard() {
   const { checkBalance } = useBalanceCheck();
 
   // Agent store
-  const { setSessions } = useAgentStore();
+  const { setSessions, setJobs, addTransaction } = useAgentStore();
 
   // State
   const [isRegistered, setIsRegistered] = useState(false);
@@ -102,12 +104,18 @@ export default function AgentDashboard() {
     checkRegistration();
   }, [checkRegistration]);
 
-  // Load sessions where user is the agent
+  // Load sessions and jobs where user is the agent + periodic refresh
   useEffect(() => {
     if (connected && publicKey && isRegistered) {
       listSessions({ agent: publicKey }).then(setSessions);
+      fetchJobs({ agent: publicKey }).then(setJobs);
+      const interval = setInterval(() => {
+        listSessions({ agent: publicKey }).then(setSessions);
+        fetchJobs({ agent: publicKey }).then(setJobs);
+      }, 60_000);
+      return () => clearInterval(interval);
     }
-  }, [connected, publicKey, isRegistered, setSessions]);
+  }, [connected, publicKey, isRegistered, setSessions, setJobs]);
 
   // Handle unregistration
   const handleUnregister = async () => {
@@ -142,6 +150,7 @@ export default function AgentDashboard() {
 
       setTxStatus(`Unregister transaction submitted: ${txId.slice(0, 16)}...`);
       toast.success('Agent unregistered successfully! Your bond will be returned.');
+      addTransaction({ type: 'escrow_claimed', agentId: publicKey! });
 
       setIsRegistered(false);
       setAgentId(null);
@@ -326,6 +335,12 @@ export default function AgentDashboard() {
 
       {/* Active Sessions (as agent) */}
       <ActiveSessionsPanel agentAddress={publicKey || ''} />
+
+      {/* Pending Multi-Sig Approvals */}
+      <PendingApprovalsPanel />
+
+      {/* Jobs Panel */}
+      <JobsPanel agentAddress={publicKey || ''} />
 
       {/* Actions */}
       <div className="grid md:grid-cols-2 gap-5">

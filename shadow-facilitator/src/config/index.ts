@@ -44,6 +44,10 @@ export const config = {
         windowMs: parseInt(process.env.RATE_LIMIT_MULTISIG_WINDOW_MS || '60000', 10),
         maxRequests: parseInt(process.env.RATE_LIMIT_MULTISIG_MAX || '10', 10),
       },
+      job: {
+        windowMs: parseInt(process.env.RATE_LIMIT_JOB_WINDOW_MS || '60000', 10),
+        maxRequests: parseInt(process.env.RATE_LIMIT_JOB_MAX || '10', 10),
+      },
     },
     // x402 payment generation rate limiting (Token Bucket) — per IP
     x402: {

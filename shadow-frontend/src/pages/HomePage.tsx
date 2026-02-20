@@ -1,6 +1,9 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Lock, Zap, Users, ArrowRight, Github, FileText, Clock, Rocket, Globe, CheckCircle, Sparkles, TrendingUp, Eye } from 'lucide-react';
+import { Shield, Lock, Zap, Users, ArrowRight, Github, FileText, Clock, Rocket, Globe, CheckCircle, Sparkles, TrendingUp, Eye, Activity } from 'lucide-react';
 import { ANIMATION_DELAY_BASE, ANIMATION_DELAY_STAGGER } from '../constants/ui';
+import { getHealthDetailed, type HealthDetailed } from '../lib/api';
+import { FACILITATOR_ENABLED } from '../config';
 
 const features = [
   {
@@ -93,6 +96,76 @@ const roadmapPhases = [
     ],
   },
 ];
+
+function SystemStatus() {
+  const [health, setHealth] = useState<HealthDetailed | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!FACILITATOR_ENABLED) {
+      setLoading(false);
+      return;
+    }
+    getHealthDetailed().then(h => {
+      setHealth(h);
+      setLoading(false);
+    });
+  }, []);
+
+  if (!FACILITATOR_ENABLED || loading || !health) return null;
+
+  const isHealthy = health.status === 'healthy';
+  const rpcStatus = health.subsystems.aleo_rpc.circuit_breaker;
+  const redisUp = health.subsystems.redis.connected;
+  const agentCount = health.subsystems.indexer.cached_agents;
+
+  return (
+    <section>
+      <div className="card">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+            <Activity className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-white">System Status</h2>
+            <p className="text-xs text-gray-500">Live facilitator infrastructure health</p>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${isHealthy ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+            <span className={`text-sm font-medium ${isHealthy ? 'text-green-400' : 'text-red-400'}`}>
+              {isHealthy ? 'All Systems Operational' : 'Degraded'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white/[0.02] rounded-xl border border-white/[0.04] p-3 text-center">
+            <p className="text-xs text-gray-500 mb-1">Aleo RPC</p>
+            <p className={`text-sm font-medium ${rpcStatus === 'closed' ? 'text-green-400' : 'text-amber-400'}`}>
+              {rpcStatus === 'closed' ? 'Connected' : rpcStatus}
+            </p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl border border-white/[0.04] p-3 text-center">
+            <p className="text-xs text-gray-500 mb-1">Redis</p>
+            <p className={`text-sm font-medium ${redisUp ? 'text-green-400' : 'text-red-400'}`}>
+              {redisUp ? 'Connected' : 'Offline'}
+            </p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl border border-white/[0.04] p-3 text-center">
+            <p className="text-xs text-gray-500 mb-1">Indexed Agents</p>
+            <p className="text-sm font-medium text-white">{agentCount}</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl border border-white/[0.04] p-3 text-center">
+            <p className="text-xs text-gray-500 mb-1">Cache Hit Rate</p>
+            <p className="text-sm font-medium text-white">
+              {(health.subsystems.indexer.cache_hit_rate * 100).toFixed(0)}%
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function HomePage() {
   return (
@@ -327,6 +400,9 @@ export default function HomePage() {
           })}
         </div>
       </section>
+
+      {/* System Status */}
+      <SystemStatus />
 
       {/* CTA */}
       <section className="relative">

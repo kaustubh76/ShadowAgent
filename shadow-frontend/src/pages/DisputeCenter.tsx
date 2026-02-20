@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Shield, CheckCircle, Clock, ArrowRight, Scale, Send, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { AlertTriangle, Shield, CheckCircle, Clock, ArrowRight, Scale, Send, RefreshCw, ThumbsUp, ThumbsDown, Gavel, Loader2 } from 'lucide-react';
 import { useAgentStore, type DisputeInfo, type RefundInfo } from '../stores/agentStore';
 import { useWalletStore } from '../stores/walletStore';
 import { useToast } from '../contexts/ToastContext';
-import { fetchDisputes, fetchRefunds, respondToDispute, acceptRefund, rejectRefund } from '../lib/api';
+import { fetchDisputes, fetchRefunds, respondToDispute, acceptRefund, rejectRefund, resolveDispute } from '../lib/api';
+import { ADMIN_ADDRESS } from '../config';
 
 function getStatusColor(status: DisputeInfo['status']) {
   switch (status) {
@@ -101,12 +102,88 @@ function DisputeTimeline({ status }: { status: DisputeInfo['status'] }) {
   );
 }
 
+function AdminResolveForm({ dispute, onResolved }: { dispute: DisputeInfo; onResolved: () => void }) {
+  const toast = useToast();
+  const [agentPct, setAgentPct] = useState(50);
+  const [isResolving, setIsResolving] = useState(false);
+
+  const agentAmount = Math.floor((dispute.escrow_amount * agentPct) / 100);
+  const clientAmount = dispute.escrow_amount - agentAmount;
+
+  const handleResolve = async () => {
+    setIsResolving(true);
+    try {
+      const result = await resolveDispute(dispute.job_hash, agentPct);
+      if (result.success) {
+        toast.success(`Dispute resolved: Agent ${agentPct}% / Client ${100 - agentPct}%`);
+        if (result.settlement) {
+          toast.info(`Agent: ${(result.settlement.agent_amount / 1_000_000).toFixed(2)} cr, Client: ${(result.settlement.client_amount / 1_000_000).toFixed(2)} cr`);
+        }
+        useAgentStore.getState().addTransaction({ type: 'dispute_resolved', agentId: dispute.agent, amount: dispute.escrow_amount });
+        onResolved();
+      } else {
+        toast.error(result.error || 'Resolution failed');
+      }
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-white/[0.04] space-y-3">
+      <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+        <Gavel className="w-3 h-3" />
+        <span className="font-medium">Admin Resolution</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-gray-400">
+        <span>Agent: {(agentAmount / 1_000_000).toFixed(2)} cr ({agentPct}%)</span>
+        <span>Client: {(clientAmount / 1_000_000).toFixed(2)} cr ({100 - agentPct}%)</span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={agentPct}
+        onChange={(e) => setAgentPct(Number(e.target.value))}
+        className="w-full accent-shadow-500"
+      />
+      <div className="flex items-center gap-1.5">
+        {[0, 25, 50, 75, 100].map(pct => (
+          <button
+            key={pct}
+            onClick={() => setAgentPct(pct)}
+            className={`px-2 py-1 rounded text-xs font-medium transition-all ${
+              agentPct === pct
+                ? 'bg-shadow-600/20 text-shadow-300 border border-shadow-500/30'
+                : 'text-gray-500 hover:text-gray-300 border border-white/[0.04]'
+            }`}
+          >
+            {pct === 0 ? 'Client' : pct === 100 ? 'Agent' : `${pct}%`}
+          </button>
+        ))}
+      </div>
+      <button
+        onClick={handleResolve}
+        disabled={isResolving}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-shadow-600 hover:bg-shadow-500 text-white transition-all disabled:opacity-50"
+      >
+        {isResolving ? (
+          <><Loader2 className="w-3 h-3 animate-spin" /> Resolving...</>
+        ) : (
+          <><Gavel className="w-3 h-3" /> Resolve Dispute</>
+        )}
+      </button>
+    </div>
+  );
+}
+
 export default function DisputeCenter() {
   const { connected, address } = useWalletStore();
   const { disputes } = useAgentStore();
   const toast = useToast();
   const [filter, setFilter] = useState<'all' | 'open' | 'resolved' | 'refunds'>('all');
-  const [role, setRole] = useState<'client' | 'agent'>('client');
+  const isAdmin = address === ADMIN_ADDRESS;
+  const [role, setRole] = useState<'client' | 'agent' | 'admin'>('client');
   const [refunds, setRefunds] = useState<RefundInfo[]>([]);
 
   // Agent respond state
@@ -120,7 +197,11 @@ export default function DisputeCenter() {
   // Fetch disputes based on role
   useEffect(() => {
     if (!connected || !address) return;
-    const params = role === 'client' ? { client: address } : { agent_id: address };
+    const params = role === 'admin'
+      ? {}
+      : role === 'client'
+        ? { client: address }
+        : { agent_id: address };
     fetchDisputes(params).then(data => {
       useAgentStore.getState().setDisputes(data);
     });
@@ -149,6 +230,11 @@ export default function DisputeCenter() {
         toast.success('Response submitted successfully');
         setRespondingTo(null);
         setEvidenceHash('');
+        // Track activity
+        const dispute = disputes.find(d => d.job_hash === jobHash);
+        if (dispute) {
+          useAgentStore.getState().addTransaction({ type: 'dispute_resolved', agentId: dispute.agent, amount: dispute.escrow_amount });
+        }
         // Re-fetch disputes
         const params = role === 'client' ? { client: address! } : { agent_id: address! };
         const data = await fetchDisputes(params);
@@ -167,6 +253,13 @@ export default function DisputeCenter() {
       const result = action === 'accept' ? await acceptRefund(jobHash) : await rejectRefund(jobHash);
       if (result.success) {
         toast.success(`Refund ${action}ed successfully`);
+        // Track accepted refunds as activity
+        if (action === 'accept') {
+          const refund = refunds.find(r => r.job_hash === jobHash);
+          if (refund) {
+            useAgentStore.getState().addTransaction({ type: 'partial_refund_accepted', agentId: refund.agent, amount: refund.total_amount });
+          }
+        }
         // Re-fetch refunds
         const data = await fetchRefunds({ agent_id: role === 'agent' ? address! : undefined });
         setRefunds(data);
@@ -209,13 +302,13 @@ export default function DisputeCenter() {
       <div className="flex items-center gap-3 mb-4">
         <span className="text-xs text-gray-500">View as:</span>
         <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/[0.04]">
-          {(['client', 'agent'] as const).map(r => (
+          {((['client', 'agent', ...(isAdmin ? ['admin'] : [])] as const) as readonly ('client' | 'agent' | 'admin')[]).map(r => (
             <button
               key={r}
               onClick={() => setRole(r)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-300 ${
                 role === r
-                  ? 'bg-shadow-600/20 text-shadow-300'
+                  ? r === 'admin' ? 'bg-amber-600/20 text-amber-300' : 'bg-shadow-600/20 text-shadow-300'
                   : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
               }`}
             >
@@ -358,12 +451,25 @@ export default function DisputeCenter() {
                           <span className="text-gray-500">Job:</span>{' '}
                           <span className="font-mono text-xs">{dispute.job_hash.slice(0, 16)}...</span>
                         </p>
-                        <p className="text-sm text-gray-300">
-                          <span className="text-gray-500">{role === 'client' ? 'Agent' : 'Client'}:</span>{' '}
-                          <span className="font-mono text-xs">
-                            {(role === 'client' ? dispute.agent : dispute.client).slice(0, 16)}...
-                          </span>
-                        </p>
+                        {role === 'admin' ? (
+                          <>
+                            <p className="text-sm text-gray-300">
+                              <span className="text-gray-500">Client:</span>{' '}
+                              <span className="font-mono text-xs">{dispute.client.slice(0, 16)}...</span>
+                            </p>
+                            <p className="text-sm text-gray-300">
+                              <span className="text-gray-500">Agent:</span>{' '}
+                              <span className="font-mono text-xs">{dispute.agent.slice(0, 16)}...</span>
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-300">
+                            <span className="text-gray-500">{role === 'client' ? 'Agent' : 'Client'}:</span>{' '}
+                            <span className="font-mono text-xs">
+                              {(role === 'client' ? dispute.agent : dispute.client).slice(0, 16)}...
+                            </span>
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -413,6 +519,18 @@ export default function DisputeCenter() {
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  {/* Admin Resolution */}
+                  {role === 'admin' && (dispute.status === 'opened' || dispute.status === 'agent_responded') && (
+                    <AdminResolveForm
+                      dispute={dispute}
+                      onResolved={() => {
+                        fetchDisputes({}).then(data => {
+                          useAgentStore.getState().setDisputes(data);
+                        });
+                      }}
+                    />
                   )}
 
                   {/* Dispute Timeline */}
