@@ -26,7 +26,7 @@ interface VerificationResult {
   error?: string;
 }
 
-import { API_BASE, FACILITATOR_ENABLED } from '../config';
+import { API_BASE } from '../config';
 
 // Multi-sig escrow type
 export interface MultiSigEscrowData {
@@ -132,10 +132,6 @@ export async function searchAgents(
   limit = 20,
   offset = 0
 ): Promise<SearchResult> {
-  // Skip fetch when facilitator backend is not configured
-  if (!FACILITATOR_ENABLED) {
-    return { ...EMPTY_SEARCH, limit, offset };
-  }
 
   try {
     const client = getClient();
@@ -185,7 +181,6 @@ export async function searchAgents(
 
 // Get a specific agent - uses SDK client if available
 export async function getAgent(agentId: string): Promise<AgentListing | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const client = getClient();
@@ -214,7 +209,6 @@ export async function getAgent(agentId: string): Promise<AgentListing | null> {
 
 // Verify a reputation proof - uses SDK client if available
 export async function verifyReputationProof(proof: ReputationProofInput): Promise<VerificationResult> {
-  if (!FACILITATOR_ENABLED) return { valid: false, error: 'Facilitator not available' };
 
   const client = getClient();
 
@@ -245,7 +239,6 @@ export async function verifyReputationProof(proof: ReputationProofInput): Promis
 export async function fetchDisputes(
   params?: { client?: string; agent_id?: string; status?: string }
 ): Promise<DisputeInfo[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const searchParams = new URLSearchParams();
@@ -277,7 +270,6 @@ export async function submitDispute(data: {
   escrow_amount: number;
   evidence_hash: string;
 }): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/disputes`, {
@@ -302,7 +294,6 @@ export async function submitDispute(data: {
 export async function fetchRefunds(
   params?: { agent_id?: string; status?: string }
 ): Promise<RefundInfo[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const searchParams = new URLSearchParams();
@@ -333,7 +324,6 @@ export async function submitRefund(data: {
   agent_amount: number;
   job_hash: string;
 }): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/refunds`, {
@@ -356,7 +346,6 @@ export async function submitRefund(data: {
 
 // Fetch multi-sig escrow status
 export async function fetchMultiSigEscrow(jobHash: string): Promise<MultiSigEscrowData | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/escrows/multisig/${jobHash}`;
@@ -383,7 +372,6 @@ export async function createMultiSigEscrow(data: {
   signers: [string, string, string];
   required_signatures: number;
 }): Promise<{ success: boolean; escrow?: MultiSigEscrowData; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/escrows/multisig`, {
@@ -409,7 +397,6 @@ export async function approveMultiSigEscrow(
   jobHash: string,
   signerAddress: string
 ): Promise<{ success: boolean; escrow?: MultiSigEscrowData; threshold_met?: boolean; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/escrows/multisig/${jobHash}/approve`, {
@@ -435,7 +422,6 @@ export async function submitRating(
   agentId: string,
   data: { job_hash: string; rating: number; payment_amount?: number }
 ): Promise<{ success: boolean; rating?: Record<string, unknown>; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/agents/${agentId}/rating`, {
@@ -461,7 +447,6 @@ export async function respondToDispute(
   jobHash: string,
   evidenceHash: string
 ): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/disputes/${jobHash}/respond`, {
@@ -486,7 +471,6 @@ export async function respondToDispute(
 export async function acceptRefund(
   jobHash: string
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/refunds/${jobHash}/accept`, {
@@ -509,7 +493,6 @@ export async function acceptRefund(
 export async function rejectRefund(
   jobHash: string
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/refunds/${jobHash}/reject`, {
@@ -563,7 +546,6 @@ export async function createSession(data: {
   rate_limit: number;
   duration_blocks: number;
 }): Promise<{ success: boolean; session?: SessionInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions`, {
@@ -586,7 +568,6 @@ export async function createSession(data: {
 
 // Get session status
 export async function getSession(sessionId: string): Promise<SessionInfo | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/sessions/${sessionId}`;
@@ -607,7 +588,6 @@ export async function getSession(sessionId: string): Promise<SessionInfo | null>
 export async function listSessions(
   params?: { client?: string; agent?: string; status?: string }
 ): Promise<SessionInfo[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const searchParams = new URLSearchParams();
@@ -635,7 +615,6 @@ export async function listSessions(
 export async function closeSession(
   sessionId: string
 ): Promise<{ success: boolean; refund_amount?: number; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/close`, {
@@ -658,7 +637,6 @@ export async function closeSession(
 export async function pauseSession(
   sessionId: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/pause`, {
@@ -681,7 +659,6 @@ export async function pauseSession(
 export async function resumeSession(
   sessionId: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/resume`, {
@@ -725,7 +702,6 @@ export async function createPolicy(data: {
   allowed_categories?: number;
   require_proofs?: boolean;
 }): Promise<{ success: boolean; policy?: PolicyInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/policies`, {
@@ -750,7 +726,6 @@ export async function createPolicy(data: {
 export async function listPolicies(
   params?: { owner?: string }
 ): Promise<PolicyInfo[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const searchParams = new URLSearchParams();
@@ -774,7 +749,6 @@ export async function listPolicies(
 
 // Get a specific policy
 export async function getPolicy(policyId: string): Promise<PolicyInfo | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/sessions/policies/${policyId}`;
@@ -803,7 +777,6 @@ export async function createSessionFromPolicy(
     duration_blocks: number;
   }
 ): Promise<{ success: boolean; session?: SessionInfo; policy_id?: string; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/policies/${policyId}/create-session`, {
@@ -834,7 +807,6 @@ export async function sessionRequest(
   amount: number,
   requestHash?: string
 ): Promise<{ success: boolean; session?: SessionInfo; receipt?: { request_hash: string; amount: number; timestamp: string }; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/request`, {
@@ -860,7 +832,6 @@ export async function settleSession(
   sessionId: string,
   settlementAmount: number
 ): Promise<{ success: boolean; session?: SessionInfo; settlement?: { amount: number; settled_at: string }; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/settle`, {
@@ -886,7 +857,6 @@ export async function resolveDispute(
   jobHash: string,
   agentPercentage: number
 ): Promise<{ success: boolean; dispute?: DisputeInfo; settlement?: { agent_amount: number; client_amount: number }; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/disputes/${jobHash}/resolve`, {
@@ -911,7 +881,6 @@ export async function resolveDispute(
 export async function getAgentByAddress(
   publicKey: string
 ): Promise<Record<string, unknown> | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/agents/by-address/${publicKey}`;
@@ -932,7 +901,6 @@ export async function getAgentByAddress(
 export async function getPendingEscrows(
   address: string
 ): Promise<MultiSigEscrowData[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const url = `${API_BASE}/escrows/multisig/pending/${address}`;
@@ -953,7 +921,6 @@ export async function getPendingEscrows(
 export async function verifyEscrowProof(
   proof: string
 ): Promise<{ valid: boolean; error?: string; verified_at?: string }> {
-  if (!FACILITATOR_ENABLED) return { valid: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/verify/escrow`, {
@@ -972,7 +939,7 @@ export async function verifyEscrowProof(
 export async function verifyNullifier(
   nullifier: string
 ): Promise<{ nullifier: string; is_used: boolean; checked_at?: string; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { nullifier, is_used: false, error: 'Facilitator not available' };
+
 
   try {
     const response = await fetch(`${API_BASE}/verify/nullifier`, {
@@ -991,7 +958,6 @@ export async function verifyNullifier(
 export async function getAgentProof(
   agentId: string
 ): Promise<Record<string, unknown> | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/agents/${agentId}/proof`;
@@ -1023,7 +989,6 @@ export interface HealthDetailed {
 }
 
 export async function getHealthDetailed(): Promise<HealthDetailed | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const response = await fetchWithRetry(`${API_BASE}/health/detailed`);
@@ -1052,7 +1017,6 @@ export async function createJob(data: {
   signers?: [string, string, string];
   required_signatures?: number;
 }): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/jobs`, {
@@ -1077,7 +1041,6 @@ export async function createJob(data: {
 export async function fetchJobs(
   params?: { agent?: string; client?: string; status?: string; service_type?: number }
 ): Promise<JobInfo[]> {
-  if (!FACILITATOR_ENABLED) return [];
 
   try {
     const searchParams = new URLSearchParams();
@@ -1103,7 +1066,6 @@ export async function fetchJobs(
 
 // Get a specific job
 export async function getJob(jobId: string): Promise<JobInfo | null> {
-  if (!FACILITATOR_ENABLED) return null;
 
   try {
     const url = `${API_BASE}/jobs/${jobId}`;
@@ -1125,7 +1087,6 @@ export async function updateJobStatus(
   jobId: string,
   updates: { status?: string; escrow_status?: string }
 ): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
-  if (!FACILITATOR_ENABLED) return { success: false, error: 'Facilitator not available' };
 
   try {
     const response = await fetch(`${API_BASE}/jobs/${jobId}`, {

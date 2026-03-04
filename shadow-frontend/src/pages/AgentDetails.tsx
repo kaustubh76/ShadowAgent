@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users, Star } from 'lucide-react';
-import { AgentListing, Tier, getServiceTypeName, getTierName } from '../stores/agentStore';
+import { AgentListing, getServiceTypeName, getTierName } from '../stores/agentStore';
 import { getAgent, verifyReputationProof, submitDispute, submitRefund, createMultiSigEscrow, approveMultiSigEscrow, submitRating } from '../lib/api';
 import { useAgentStore } from '../stores/agentStore';
 import TierBadge from '../components/TierBadge';
@@ -324,14 +324,6 @@ export default function AgentDetails() {
         setAgent(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch agent');
-        // Demo fallback
-        setAgent({
-          agent_id: agentId,
-          service_type: 1,
-          endpoint_hash: 'demo_hash_' + agentId.slice(0, 8),
-          tier: Tier.Gold,
-          is_active: true,
-        });
       } finally {
         setLoading(false);
       }

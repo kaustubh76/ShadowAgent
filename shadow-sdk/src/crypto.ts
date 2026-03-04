@@ -179,10 +179,7 @@ export async function signData(
 
     return signature.to_string();
   } catch (error) {
-    console.error('Aleo signing failed:', error);
-    // Fallback to hash-based signature for testing
-    const hash = await sha256Hex(data);
-    return `sig_${hash.substring(0, 32)}`;
+    throw new Error(`Aleo signing failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -197,13 +194,6 @@ export async function verifySignature(
   await ensureThreadPool();
 
   try {
-    // If it's a hash-based signature from fallback, do basic validation
-    if (signature.startsWith('sig_')) {
-      const expectedHash = await sha256Hex(data);
-      return signature === `sig_${expectedHash.substring(0, 32)}`;
-    }
-
-    // Real Aleo signature verification
     const { Signature, Address } = await getSDK();
     const sig = Signature.from_string(signature);
     const address = Address.from_string(publicKeyStr);
@@ -211,8 +201,7 @@ export async function verifySignature(
 
     return sig.verify(address, dataBytes);
   } catch (error) {
-    console.error('Signature verification failed:', error);
-    return false;
+    throw new Error(`Signature verification failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -276,22 +265,7 @@ export async function createEscrowProof(
       amount: escrowData.amount,
     };
   } catch (error) {
-    console.error('Escrow proof creation failed:', error);
-
-    // Fallback for testing
-    const proofData = {
-      commitment,
-      amount: escrowData.amount,
-      jobHash: escrowData.jobHash,
-      timestamp: Date.now(),
-    };
-
-    return {
-      proof: encodeBase64(proofData),
-      nullifier,
-      commitment,
-      amount: escrowData.amount,
-    };
+    throw new Error(`Escrow proof creation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -751,6 +725,30 @@ export function calculateEffectiveTier(
   if (jobs >= 50 && revenue >= 100_000_000) return 2;       // Silver
   if (jobs >= 10 && revenue >= 10_000_000) return 1;        // Bronze
   return 0; // New
+}
+
+/**
+ * Get record ciphertexts from a confirmed transaction's outputs
+ * Used to store records locally for use as inputs to record-consuming transitions
+ *
+ * @param txId - Transaction ID to fetch outputs from
+ * @returns Array of record ciphertext strings
+ */
+export async function getTransactionRecordOutputs(txId: string): Promise<string[]> {
+  const response = await fetch(`${TESTNET_API}/transaction/${txId}`);
+  if (!response.ok) return [];
+
+  const tx = await response.json() as {
+    execution?: {
+      transitions?: Array<{
+        outputs?: Array<{ type: string; value: string }>;
+      }>;
+    };
+  };
+
+  return tx.execution?.transitions?.[0]?.outputs
+    ?.filter(o => o.type === 'record')
+    .map(o => o.value) || [];
 }
 
 /**

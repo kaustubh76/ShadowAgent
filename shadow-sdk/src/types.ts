@@ -225,6 +225,10 @@ export interface EscrowProof {
   nullifier: string;
   commitment: string;
   amount?: number;
+  /** On-chain transaction ID for verification (e.g., from create_escrow or transfer_public) */
+  transactionId?: string;
+  /** Record ciphertext for on-chain claim_escrow transition */
+  escrowCiphertext?: string;
 }
 
 /**

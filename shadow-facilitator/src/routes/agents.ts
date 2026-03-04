@@ -2,6 +2,7 @@
 
 import { Router, Request, Response } from 'express';
 import { indexerService } from '../services/indexer';
+import { aleoService } from '../services/aleo';
 import { SearchParams, ServiceType, Tier } from '../types';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { config } from '../config';
@@ -110,6 +111,40 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
 
     const agentId = address || `agent_${Date.now()}`;
 
+    // Verify tx_id on-chain if provided
+    let onChainVerified = false;
+    if (tx_id) {
+      try {
+        const tx = await aleoService.getTransaction(tx_id) as Record<string, unknown> | null;
+        if (tx) {
+          const execution = tx.execution as {
+            transitions?: Array<{ program: string; function: string }>;
+          } | undefined;
+          const transition = execution?.transitions?.[0];
+
+          if (transition?.program === 'shadow_agent.aleo' &&
+              transition?.function === 'register_agent') {
+            onChainVerified = true;
+
+            const status = tx.status as string | undefined;
+            if (status && status !== 'accepted') {
+              res.status(400).json({
+                error: `Transaction ${tx_id} has status "${status}", not accepted`,
+              });
+              return;
+            }
+          } else if (transition) {
+            res.status(400).json({
+              error: `Transaction is not a register_agent call (found ${transition.program}/${transition.function})`,
+            });
+            return;
+          }
+        }
+      } catch {
+        // Non-blocking: if RPC is down, still accept the registration
+      }
+    }
+
     // Cache the listing directly from request data (on-chain agent_listings mapping
     // uses BHP256 hash as key, which we can't derive here, so construct from body)
     indexerService.cacheAgent({
@@ -128,6 +163,7 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
       success: true,
       agent_id: agentId,
       bond_record: tx_id || undefined,
+      on_chain_verified: onChainVerified,
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to register agent' });
@@ -268,7 +304,7 @@ router.get('/:agentId', async (req: Request, res: Response) => {
   }
 });
 
-// GET /agents/:agentId/proof - Get agent's latest tier proof
+// GET /agents/:agentId/proof - Get agent's tier proof with real verification
 router.get('/:agentId/proof', async (req: Request, res: Response) => {
   try {
     const { agentId } = req.params;
@@ -279,14 +315,50 @@ router.get('/:agentId/proof', async (req: Request, res: Response) => {
       return;
     }
 
-    // In production, this would fetch the latest proof from chain
+    // If a proof is provided, verify it using the real Aleo service
+    const proofParam = req.query.proof as string;
+    const transactionId = req.query.tx_id as string;
+
+    if (proofParam) {
+      const reputationProof = {
+        owner: agentId,
+        proof_type: parseInt(req.query.proof_type as string) || 4,
+        threshold: parseInt(req.query.threshold as string) || 0,
+        threshold_met: true,
+        tier_proven: agent.tier,
+        generated_at: 0,
+        proof: proofParam,
+        tier: agent.tier,
+        transactionId,
+      };
+
+      const result = await aleoService.verifyReputationProof(reputationProof);
+
+      res.json({
+        agent_id: agentId,
+        tier: agent.tier,
+        tier_name: Tier[agent.tier],
+        proof_type: reputationProof.proof_type,
+        threshold_met: result.valid,
+        verified_on_chain: !!transactionId,
+        message: result.valid
+          ? (transactionId ? 'Tier verified via on-chain ZK proof' : 'Tier verified via proof validation')
+          : (result.error || 'Proof verification failed'),
+      });
+      return;
+    }
+
+    // No proof provided — return tier from cache with verification caveat
     res.json({
       agent_id: agentId,
       tier: agent.tier,
       tier_name: Tier[agent.tier],
       proof_type: 4,
-      threshold_met: true,
-      message: 'Tier verified via ZK proof',
+      threshold_met: agent.tier > 0,
+      verified_on_chain: false,
+      message: agent.tier > 0
+        ? 'Tier from cached listing (provide proof and tx_id for on-chain verification)'
+        : 'Agent is New tier',
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get proof' });

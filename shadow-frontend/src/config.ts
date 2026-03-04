@@ -8,7 +8,8 @@ export const FACILITATOR_URL =
 export const API_BASE =
   import.meta.env.VITE_API_URL || import.meta.env.VITE_FACILITATOR_URL || '/api';
 
-export const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+/** Facilitator is always required for real testnet execution */
+export const FACILITATOR_ENABLED = true;
 
 export const ADMIN_ADDRESS =
   import.meta.env.VITE_ADMIN_ADDRESS ||

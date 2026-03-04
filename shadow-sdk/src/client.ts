@@ -22,7 +22,6 @@ import {
   createEscrowProof,
   encodeBase64,
   decodeBase64,
-  generateNullifier,
   generateAgentId,
   transferPublic,
   getBalance,
@@ -326,46 +325,37 @@ export class ShadowAgentClient {
       this.config.privateKey
     );
 
-    // If private key is available, execute real on-chain transfer
-    if (this.config.privateKey) {
-      try {
-        // Check balance first
-        const senderAddress = await getAddress(this.config.privateKey);
-        const balance = await getBalance(senderAddress);
-        const fee = 10_000; // 0.01 credits fee
-        const totalNeeded = paymentTerms.price + fee;
+    if (!this.config.privateKey) {
+      throw new Error('Private key required for on-chain escrow creation');
+    }
 
-        if (balance < totalNeeded) {
-          console.warn(
-            `Insufficient balance for on-chain escrow: have ${balance}, need ${totalNeeded}`
-          );
-        } else {
-          // Execute real transfer_public to the agent's address
-          console.log(`Executing on-chain transfer: ${paymentTerms.price} microcredits to ${paymentTerms.address}`);
-          const txId = await transferPublic(
-            this.config.privateKey,
-            paymentTerms.address,
-            paymentTerms.price,
-            fee
-          );
+    // Check balance first
+    const senderAddress = await getAddress(this.config.privateKey);
+    const balance = await getBalance(senderAddress);
+    const fee = 10_000; // 0.01 credits fee
+    const totalNeeded = paymentTerms.price + fee;
 
-          console.log(`On-chain escrow transfer submitted: ${txId}`);
+    if (balance < totalNeeded) {
+      throw new Error(
+        `Insufficient balance for on-chain escrow: have ${balance}, need ${totalNeeded}`
+      );
+    }
 
-          // Store transaction ID in the proof
-          (proof as any).txId = txId;
+    // Execute real transfer_public to the agent's address
+    const txId = await transferPublic(
+      this.config.privateKey,
+      paymentTerms.address,
+      paymentTerms.price,
+      fee
+    );
 
-          // Optionally wait for confirmation
-          const confirmation = await waitForTransaction(txId, 12, 5000);
-          if (confirmation.confirmed) {
-            console.log(`Escrow confirmed at block ${confirmation.blockHeight}`);
-          } else {
-            console.warn(`Escrow not yet confirmed: ${confirmation.error}`);
-          }
-        }
-      } catch (error) {
-        console.warn('On-chain escrow creation failed, using off-chain proof:', error);
-        // Continue with off-chain proof as fallback
-      }
+    // Store transaction ID in the proof
+    (proof as EscrowProof).transactionId = txId;
+
+    // Wait for confirmation
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+    if (!confirmation.confirmed) {
+      throw new Error(`Escrow transaction not confirmed: ${confirmation.error}`);
     }
 
     return proof;
@@ -399,73 +389,41 @@ export class ShadowAgentClient {
     // Scale rating (5 stars = 50)
     const scaledRating = Math.round(rating * 10);
 
-    // Generate nullifier to prevent double-rating
-    const callerHash = await generateAgentId(this.config.privateKey || 'anonymous');
-    const nullifier = await generateNullifier(callerHash, jobHash);
-
-    // If private key available, submit on-chain rating with credit burn
-    if (this.config.privateKey) {
-      try {
-        // Check balance for burn cost
-        const senderAddress = await getAddress(this.config.privateKey);
-        const balance = await getBalance(senderAddress);
-        const fee = 10_000; // 0.01 credits fee
-        const totalNeeded = RATING_BURN_COST + fee;
-
-        if (balance < totalNeeded) {
-          return {
-            success: false,
-            error: `Insufficient balance for rating burn: have ${balance}, need ${totalNeeded} microcredits`,
-          };
-        }
-
-        // Execute real transfer as burn (send to burn address or self with fee as burn)
-        // For Sybil resistance, we transfer a small amount as proof-of-stake
-        console.log(`Executing rating burn: ${RATING_BURN_COST} microcredits`);
-        const txId = await transferPublic(
-          this.config.privateKey,
-          agentAddress, // Send to agent as part of the rating
-          RATING_BURN_COST,
-          fee
-        );
-
-        console.log(`Rating burn transaction submitted: ${txId}`);
-
-        // Wait for confirmation
-        const confirmation = await waitForTransaction(txId, 12, 5000);
-        if (!confirmation.confirmed) {
-          console.warn(`Rating burn not yet confirmed: ${confirmation.error}`);
-        }
-
-        // Notify facilitator for indexing
-        await this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId);
-
-        return { success: true, txId };
-      } catch (error) {
-        console.warn('On-chain rating failed, submitting via facilitator:', error);
-        // Fall through to facilitator submission
-      }
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain rating submission' };
     }
 
-    // Fallback: submit via facilitator (for demo/testing)
-    const url = `${this.config.facilitatorUrl}/agents/${agentAddress}/rating`;
-    const response = await this.fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        job_hash: jobHash,
-        rating: scaledRating,
-        payment_amount: paymentAmount,
-        nullifier,
-      }),
-    });
+    // Check balance for burn cost
+    const senderAddress = await getAddress(this.config.privateKey);
+    const balance = await getBalance(senderAddress);
+    const fee = 10_000; // 0.01 credits fee
+    const totalNeeded = RATING_BURN_COST + fee;
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({})) as { error?: string };
-      return { success: false, error: errorData.error || 'Failed to submit rating' };
+    if (balance < totalNeeded) {
+      return {
+        success: false,
+        error: `Insufficient balance for rating burn: have ${balance}, need ${totalNeeded} microcredits`,
+      };
     }
 
-    return { success: true };
+    // Execute real transfer as burn — Sybil resistance via proof-of-stake
+    const txId = await transferPublic(
+      this.config.privateKey,
+      agentAddress,
+      RATING_BURN_COST,
+      fee
+    );
+
+    // Wait for confirmation
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+    if (!confirmation.confirmed) {
+      return { success: false, error: `Rating burn not confirmed: ${confirmation.error}` };
+    }
+
+    // Notify facilitator for indexing (non-blocking)
+    this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch(() => {});
+
+    return { success: true, txId };
   }
 
   /**
@@ -610,44 +568,14 @@ export class ShadowAgentClient {
       return { success: false, error: 'Private key required for partial refund proposal' };
     }
 
-    try {
-      const txId = await executeProgram(
-        this.config.privateKey,
-        SHADOW_AGENT_EXT_PROGRAM,
-        'propose_partial_refund',
-        [agent, `${totalAmount}u64`, `${agentAmount}u64`, jobHash],
-      );
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_EXT_PROGRAM,
+      'propose_partial_refund',
+      [agent, `${totalAmount}u64`, `${agentAmount}u64`, jobHash],
+    );
 
-      return { success: true, txId };
-    } catch (error) {
-      // Fallback to facilitator
-      try {
-        const url = `${this.config.facilitatorUrl}/refunds`;
-        const response = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agent,
-            total_amount: totalAmount,
-            agent_amount: agentAmount,
-            job_hash: jobHash,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({})) as { error?: string };
-          return { success: false, error: errorData.error || 'Partial refund proposal failed' };
-        }
-
-        const result = await response.json() as { tx_id?: string };
-        return { success: true, txId: result.tx_id };
-      } catch (facilitatorError) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Partial refund proposal failed',
-        };
-      }
-    }
+    return { success: true, txId };
   }
 
   /**
@@ -688,46 +616,16 @@ export class ShadowAgentClient {
       return { success: false, error: 'Private key required to open a dispute' };
     }
 
-    try {
-      const adminAddress = this.config.adminAddress;
+    const adminAddress = this.config.adminAddress;
 
-      const txId = await executeProgram(
-        this.config.privateKey,
-        SHADOW_AGENT_EXT_PROGRAM,
-        'open_dispute',
-        [agent, jobHash, `${escrowAmount}u64`, evidenceHash, adminAddress],
-      );
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_EXT_PROGRAM,
+      'open_dispute',
+      [agent, jobHash, `${escrowAmount}u64`, evidenceHash, adminAddress],
+    );
 
-      return { success: true, txId };
-    } catch (error) {
-      // Fallback to facilitator
-      try {
-        const url = `${this.config.facilitatorUrl}/disputes`;
-        const response = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agent,
-            job_hash: jobHash,
-            escrow_amount: escrowAmount,
-            evidence_hash: evidenceHash,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({})) as { error?: string };
-          return { success: false, error: errorData.error || 'Failed to open dispute' };
-        }
-
-        const result = await response.json() as { tx_id?: string };
-        return { success: true, txId: result.tx_id };
-      } catch {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to open dispute',
-        };
-      }
-    }
+    return { success: true, txId };
   }
 
   /**
@@ -775,57 +673,24 @@ export class ShadowAgentClient {
     // Store secret for later use
     this.escrowSecrets.set(jobHash, secret);
 
-    try {
-      const txId = await executeProgram(
-        this.config.privateKey,
-        SHADOW_AGENT_EXT_PROGRAM,
-        'create_multisig_escrow',
-        [
-          agent,
-          `${amount}u64`,
-          jobHash,
-          secretHash,
-          `${deadline}u64`,
-          config.signers[0],
-          config.signers[1],
-          config.signers[2],
-          `${config.required_signatures}u8`,
-        ],
-      );
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_EXT_PROGRAM,
+      'create_multisig_escrow',
+      [
+        agent,
+        `${amount}u64`,
+        jobHash,
+        secretHash,
+        `${deadline}u64`,
+        config.signers[0],
+        config.signers[1],
+        config.signers[2],
+        `${config.required_signatures}u8`,
+      ],
+    );
 
-      return { success: true, txId, secretHash };
-    } catch (error) {
-      // Fallback to facilitator
-      try {
-        const url = `${this.config.facilitatorUrl}/escrows/multisig`;
-        const response = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agent,
-            amount,
-            job_hash: jobHash,
-            secret_hash: secretHash,
-            deadline,
-            signers: config.signers,
-            required_signatures: config.required_signatures,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({})) as { error?: string };
-          return { success: false, error: errorData.error || 'Multi-sig escrow creation failed' };
-        }
-
-        const result = await response.json() as { tx_id?: string };
-        return { success: true, txId: result.tx_id, secretHash };
-      } catch {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Multi-sig escrow creation failed',
-        };
-      }
-    }
+    return { success: true, txId, secretHash };
   }
 
   /**
@@ -870,56 +735,24 @@ export class ShadowAgentClient {
 
     const sessionId = generateSessionId();
 
-    try {
-      // Fetch current block height for on-chain verification
-      const blockHeight = await this.getCurrentBlockHeight();
+    // Fetch current block height for on-chain verification
+    const blockHeight = await this.getCurrentBlockHeight();
 
-      const txId = await executeProgram(
-        this.config.privateKey,
-        SHADOW_AGENT_SESSION_PROGRAM,
-        'create_session',
-        [
-          agent,
-          `${maxTotal}u64`,
-          `${maxPerRequest}u64`,
-          `${rateLimit}u64`,
-          `${durationBlocks}u64`,
-          `${blockHeight}u64`,
-        ],
-      );
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_SESSION_PROGRAM,
+      'create_session',
+      [
+        agent,
+        `${maxTotal}u64`,
+        `${maxPerRequest}u64`,
+        `${rateLimit}u64`,
+        `${durationBlocks}u64`,
+        `${blockHeight}u64`,
+      ],
+    );
 
-      return { success: true, sessionId, txId };
-    } catch (error) {
-      // Fallback to facilitator
-      try {
-        const url = `${this.config.facilitatorUrl}/sessions`;
-        const response = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agent,
-            max_total: maxTotal,
-            max_per_request: maxPerRequest,
-            rate_limit: rateLimit,
-            duration_blocks: durationBlocks,
-            session_id: sessionId,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({})) as { error?: string };
-          return { success: false, error: errorData.error || 'Session creation failed' };
-        }
-
-        const result = await response.json() as { session_id?: string; tx_id?: string };
-        return { success: true, sessionId: result.session_id || sessionId, txId: result.tx_id };
-      } catch {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Session creation failed',
-        };
-      }
-    }
+    return { success: true, sessionId, txId };
   }
 
   /**
@@ -1114,59 +947,23 @@ export class ShadowAgentClient {
       return { success: false, error: 'maxSingleRequest cannot exceed maxSessionValue' };
     }
 
-    try {
-      const blockHeight = await this.getCurrentBlockHeight();
+    const blockHeight = await this.getCurrentBlockHeight();
 
-      const txId = await executeProgram(
-        this.config.privateKey,
-        SHADOW_AGENT_SESSION_PROGRAM,
-        'create_policy',
-        [
-          `${maxSessionValue}u64`,
-          `${maxSingleRequest}u64`,
-          `${allowedTiers}u8`,
-          `${allowedCategories}u64`,
-          requireProofs.toString(),
-          `${blockHeight}u64`,
-        ],
-      );
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_SESSION_PROGRAM,
+      'create_policy',
+      [
+        `${maxSessionValue}u64`,
+        `${maxSingleRequest}u64`,
+        `${allowedTiers}u8`,
+        `${allowedCategories}u64`,
+        requireProofs.toString(),
+        `${blockHeight}u64`,
+      ],
+    );
 
-      return { success: true, txId };
-    } catch (error) {
-      // Fallback to facilitator
-      try {
-        const senderAddress = this.config.privateKey
-          ? await getAddress(this.config.privateKey)
-          : 'unknown';
-
-        const url = `${this.config.facilitatorUrl}/sessions/policies`;
-        const response = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            owner: senderAddress,
-            max_session_value: maxSessionValue,
-            max_single_request: maxSingleRequest,
-            allowed_tiers: allowedTiers,
-            allowed_categories: allowedCategories,
-            require_proofs: requireProofs,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({})) as { error?: string };
-          return { success: false, error: errorData.error || 'Policy creation failed' };
-        }
-
-        const result = await response.json() as { policy?: { policy_id?: string } };
-        return { success: true, policyId: result.policy?.policy_id };
-      } catch {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Policy creation failed',
-        };
-      }
-    }
+    return { success: true, txId };
   }
 
   /**

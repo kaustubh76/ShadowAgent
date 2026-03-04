@@ -25,9 +25,14 @@ import {
   decodeBase64,
   executeProgram,
   getBlockHeight,
+  getAddress,
+  waitForTransaction,
+  getTransactionRecordOutputs,
   calculateDecayedRating,
+  SHADOW_AGENT_PROGRAM,
   SHADOW_AGENT_EXT_PROGRAM,
 } from './crypto';
+import { RecordStore } from './recordStore';
 
 const DEFAULT_FACILITATOR_URL = 'http://localhost:3000';
 const DEFAULT_PRICE = 100000; // 0.1 credits in microcents
@@ -72,6 +77,7 @@ export class ShadowAgentServer {
   private _agentIdReady: Promise<void>;
   private pendingJobs: Map<string, PendingJob> = new Map();
   private reputation: AgentReputation | null = null;
+  private recordStore: RecordStore;
 
   constructor(config: AgentConfig) {
     this.config = {
@@ -86,6 +92,9 @@ export class ShadowAgentServer {
     this._agentIdReady = generateAgentId(config.privateKey).then(id => {
       this.agentId = id;
     });
+
+    // Record store for tracking on-chain record ciphertexts (UTXO model)
+    this.recordStore = new RecordStore();
 
     // Clean up old pending jobs periodically
     setInterval(() => this.cleanupPendingJobs(), 60000);
@@ -107,7 +116,7 @@ export class ShadowAgentServer {
   async register(
     endpointUrl: string,
     bondAmount: number = 10_000_000
-  ): Promise<{ success: boolean; agentId?: string; bondRecord?: string; error?: string }> {
+  ): Promise<{ success: boolean; agentId?: string; bondRecord?: string; txId?: string; error?: string }> {
     await this.ensureAgentId();
 
     // Validate bond amount meets minimum requirement
@@ -122,33 +131,79 @@ export class ShadowAgentServer {
     // Hash the endpoint URL for privacy
     const endpointHash = await generateAgentId(endpointUrl);
 
-    // In production, this would submit register_agent transaction to Aleo
-    // which stakes the bond and creates the AgentReputation + AgentBond records
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain registration' };
+    }
 
-    const url = `${this.config.facilitatorUrl}/agents/register`;
-    const response = await fetch(url, {
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_PROGRAM,
+      'register_agent',
+      [
+        `${this.config.serviceType}u8`,
+        `${endpointHash}field`,
+        `${bondAmount}u64`,
+      ],
+    );
+
+    // Wait for confirmation
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+
+    if (!confirmation.confirmed) {
+      return { success: false, error: confirmation.error || 'Transaction not confirmed' };
+    }
+
+    // Extract and store output records (AgentReputation, AgentBond)
+    const recordOutputs = await getTransactionRecordOutputs(txId);
+    const address = await getAddress(this.config.privateKey);
+
+    if (recordOutputs.length >= 2) {
+      this.recordStore.store({
+        key: `${txId}:0`,
+        programId: SHADOW_AGENT_PROGRAM,
+        recordType: 'AgentReputation',
+        ciphertext: recordOutputs[0],
+        owner: address,
+        createdAt: Date.now(),
+        consumed: false,
+      });
+      this.recordStore.store({
+        key: `${txId}:1`,
+        programId: SHADOW_AGENT_PROGRAM,
+        recordType: 'AgentBond',
+        ciphertext: recordOutputs[1],
+        owner: address,
+        createdAt: Date.now(),
+        consumed: false,
+      });
+    }
+
+    // Notify facilitator for indexing (non-blocking)
+    this.notifyFacilitatorRegistration(endpointHash, bondAmount, txId).catch(() => {});
+
+    return { success: true, agentId: this.agentId, txId };
+  }
+
+  /**
+   * Notify facilitator of on-chain registration for indexing
+   */
+  private async notifyFacilitatorRegistration(
+    endpointHash: string,
+    bondAmount: number,
+    txId: string,
+  ): Promise<void> {
+    const address = await getAddress(this.config.privateKey);
+    await fetch(`${this.config.facilitatorUrl}/agents/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        address,
         service_type: this.config.serviceType,
         endpoint_hash: endpointHash,
         bond_amount: bondAmount,
+        tx_id: txId,
       }),
     });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({})) as { error?: string };
-      return { success: false, error: errorData.error || 'Registration failed' };
-    }
-
-    const result = await response.json() as { agent_id: string; bond_record?: string };
-    this.agentId = result.agent_id;
-
-    return {
-      success: true,
-      agentId: this.agentId,
-      bondRecord: result.bond_record,
-    };
   }
 
   /**
@@ -156,29 +211,49 @@ export class ShadowAgentServer {
    *
    * @returns Unregistration result with bond amount returned
    */
-  async unregister(): Promise<{ success: boolean; bondReturned?: number; error?: string }> {
-    // In production, this would submit unregister_agent transaction to Aleo
-    // which returns the bond and deactivates the agent listing
-
-    const url = `${this.config.facilitatorUrl}/agents/unregister`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agent_id: this.agentId,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({})) as { error?: string };
-      return { success: false, error: errorData.error || 'Unregistration failed' };
+  async unregister(): Promise<{ success: boolean; bondReturned?: number; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain unregistration' };
     }
 
-    const result = await response.json() as { bond_returned: number };
-    return {
-      success: true,
-      bondReturned: result.bond_returned,
-    };
+    const address = await getAddress(this.config.privateKey);
+    const repRecord = this.recordStore.getLatest(SHADOW_AGENT_PROGRAM, 'AgentReputation', address);
+    const bondRecord = this.recordStore.getLatest(SHADOW_AGENT_PROGRAM, 'AgentBond', address);
+
+    if (!repRecord || !bondRecord) {
+      return { success: false, error: 'Missing AgentReputation or AgentBond records. Register first or import records.' };
+    }
+
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_PROGRAM,
+      'unregister_agent',
+      [repRecord.ciphertext, bondRecord.ciphertext],
+    );
+
+    // Mark old records as consumed
+    this.recordStore.markConsumed(repRecord.key);
+    this.recordStore.markConsumed(bondRecord.key);
+
+    // Wait for confirmation and extract returned bond record
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+    if (confirmation.confirmed) {
+      const outputs = await getTransactionRecordOutputs(txId);
+      if (outputs.length >= 1) {
+        this.recordStore.store({
+          key: `${txId}:0`,
+          programId: SHADOW_AGENT_PROGRAM,
+          recordType: 'AgentBond',
+          ciphertext: outputs[0],
+          owner: address,
+          createdAt: Date.now(),
+          consumed: false,
+          metadata: { returned: true },
+        });
+      }
+    }
+
+    return { success: true, txId };
   }
 
   /**
@@ -287,25 +362,62 @@ export class ShadowAgentServer {
         };
       }
 
-      // Check if job hash matches
+      // Store the client's proof for later claim
       const pendingJob = this.pendingJobs.get(jobHash);
-      if (!pendingJob) {
-        // Job might have been created by client directly
-        // In production, would verify on-chain
-      } else {
-        // Store the client's proof
+      if (pendingJob) {
         pendingJob.clientProof = proof;
       }
 
-      // In production, would verify:
-      // 1. ZK proof is valid
-      // 2. Escrow exists on-chain
-      // 3. Escrow amount >= required
-      // 4. Escrow hasn't been claimed/refunded
+      // On-chain verification required when transaction ID is provided
+      if (proof.transactionId) {
+        const response = await fetch(
+          `https://api.explorer.provable.com/v1/testnet/transaction/${proof.transactionId}`
+        );
 
+        if (!response.ok) {
+          return {
+            valid: false,
+            error: `Failed to verify transaction on-chain: ${response.statusText}`,
+          };
+        }
+
+        const tx = await response.json() as {
+          status?: string;
+          execution?: {
+            transitions?: Array<{
+              program: string;
+              function: string;
+            }>;
+          };
+        };
+
+        // Verify transaction is accepted
+        if (tx.status && tx.status !== 'accepted') {
+          return {
+            valid: false,
+            error: `Transaction status: ${tx.status}, expected accepted`,
+          };
+        }
+
+        // Verify it's from the correct program
+        const transition = tx.execution?.transitions?.[0];
+        if (transition) {
+          const validPrograms = [SHADOW_AGENT_PROGRAM, 'credits.aleo'];
+          if (!validPrograms.includes(transition.program)) {
+            return {
+              valid: false,
+              error: `Unexpected program: ${transition.program}`,
+            };
+          }
+        }
+
+        return { valid: true, amount: proof.amount || requiredAmount };
+      }
+
+      // No transaction ID — require on-chain proof
       return {
-        valid: true,
-        amount: proof.amount || requiredAmount,
+        valid: false,
+        error: 'Missing transactionId — on-chain payment proof required',
       };
     } catch (error) {
       return {
@@ -318,20 +430,38 @@ export class ShadowAgentServer {
   /**
    * Claim an escrow by revealing the secret
    */
-  async claimEscrow(jobHash: string): Promise<{ success: boolean; error?: string }> {
+  async claimEscrow(jobHash: string): Promise<{ success: boolean; txId?: string; error?: string }> {
     const pendingJob = this.pendingJobs.get(jobHash);
 
     if (!pendingJob) {
       return { success: false, error: 'Job not found' };
     }
 
-    // In production, this would submit claim_escrow transaction to Aleo
-    // with the secret as proof of delivery
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain escrow claim' };
+    }
 
-    // For now, remove from pending
+    if (!pendingJob.clientProof?.escrowCiphertext) {
+      return { success: false, error: 'Missing escrow ciphertext — on-chain escrow record required' };
+    }
+
+    // Convert hex secret to a field value for Leo's BHP256 hash check
+    // Note: On-chain claim only works for escrows created on-chain where
+    // secret_hash was computed with BHP256::hash_to_field (not SHA-256)
+    const secretField = `${BigInt('0x' + pendingJob.secret.slice(0, 16))}field`;
+
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_PROGRAM,
+      'claim_escrow',
+      [
+        pendingJob.clientProof.escrowCiphertext,
+        secretField,
+      ],
+    );
+
     this.pendingJobs.delete(jobHash);
-
-    return { success: true };
+    return { success: true, txId };
   }
 
   /**
@@ -375,15 +505,52 @@ export class ShadowAgentServer {
     ratingRecord: {
       rating: number;
       payment_amount: number;
+      ratingRecordCiphertext: string;
     }
-  ): Promise<{ success: boolean; newTier?: Tier }> {
+  ): Promise<{ success: boolean; newTier?: Tier; txId?: string; error?: string }> {
     if (!this.reputation) {
-      return { success: false };
+      return { success: false, error: 'No reputation data available. Register first.' };
     }
 
-    // In production, this would submit update_reputation transaction to Aleo
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain reputation update' };
+    }
 
-    // Update local state (for caching)
+    const address = await getAddress(this.config.privateKey);
+    const repRecord = this.recordStore.getLatest(SHADOW_AGENT_PROGRAM, 'AgentReputation', address);
+
+    if (!repRecord) {
+      return { success: false, error: 'Missing AgentReputation record. Register first or import records.' };
+    }
+
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_PROGRAM,
+      'update_reputation',
+      [repRecord.ciphertext, ratingRecord.ratingRecordCiphertext],
+    );
+
+    // Mark old reputation record consumed
+    this.recordStore.markConsumed(repRecord.key);
+
+    // Wait for confirmation and store new reputation record
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+    if (confirmation.confirmed) {
+      const outputs = await getTransactionRecordOutputs(txId);
+      if (outputs.length >= 1) {
+        this.recordStore.store({
+          key: `${txId}:0`,
+          programId: SHADOW_AGENT_PROGRAM,
+          recordType: 'AgentReputation',
+          ciphertext: outputs[0],
+          owner: address,
+          createdAt: Date.now(),
+          consumed: false,
+        });
+      }
+    }
+
+    // Update local cache
     this.reputation.total_jobs += 1;
     this.reputation.total_rating_points += ratingRecord.rating;
     this.reputation.total_revenue += ratingRecord.payment_amount;
@@ -393,10 +560,7 @@ export class ShadowAgentServer {
     );
     this.reputation.last_updated = Date.now();
 
-    return {
-      success: true,
-      newTier: this.reputation.tier,
-    };
+    return { success: true, newTier: this.reputation.tier, txId };
   }
 
   /**
@@ -404,17 +568,63 @@ export class ShadowAgentServer {
    */
   async updateListing(
     newServiceType?: ServiceType,
-    _newEndpointUrl?: string,
-    _isActive?: boolean
-  ): Promise<{ success: boolean; error?: string }> {
-    // In production, this would submit update_listing transaction to Aleo
-    // _newEndpointUrl and _isActive would be used in the on-chain update
+    newEndpointUrl?: string,
+    isActive?: boolean
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain listing update' };
+    }
+
+    const serviceType = newServiceType ?? this.config.serviceType;
+    const active = isActive ?? true;
+
+    const address = await getAddress(this.config.privateKey);
+    const repRecord = this.recordStore.getLatest(SHADOW_AGENT_PROGRAM, 'AgentReputation', address);
+
+    if (!repRecord) {
+      return { success: false, error: 'Missing AgentReputation record. Register first or import records.' };
+    }
+
+    const endpointHash = newEndpointUrl
+      ? await generateAgentId(newEndpointUrl)
+      : '0';
+
+    const txId = await executeProgram(
+      this.config.privateKey,
+      SHADOW_AGENT_PROGRAM,
+      'update_listing',
+      [
+        repRecord.ciphertext,
+        `${serviceType}u8`,
+        `${endpointHash}field`,
+        active.toString(),
+      ],
+    );
+
+    // Mark old record consumed, store new one
+    this.recordStore.markConsumed(repRecord.key);
+
+    const confirmation = await waitForTransaction(txId, 12, 5000);
+    if (confirmation.confirmed) {
+      const outputs = await getTransactionRecordOutputs(txId);
+      if (outputs.length >= 1) {
+        this.recordStore.store({
+          key: `${txId}:0`,
+          programId: SHADOW_AGENT_PROGRAM,
+          recordType: 'AgentReputation',
+          ciphertext: outputs[0],
+          owner: address,
+          createdAt: Date.now(),
+          consumed: false,
+        });
+      }
+    }
 
     if (newServiceType !== undefined) {
       this.config.serviceType = newServiceType;
     }
 
-    return { success: true };
+    return { success: true, txId };
   }
 
   /**
@@ -425,7 +635,41 @@ export class ShadowAgentServer {
       return this.reputation;
     }
 
-    // In production, would fetch from chain via facilitator
+    // Fetch from facilitator index (which reads from on-chain data)
+    await this.ensureAgentId();
+    const address = this.config.privateKey
+      ? await getAddress(this.config.privateKey)
+      : this.agentId;
+
+    const url = `${this.config.facilitatorUrl}/agents/by-address/${address}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json() as {
+      agent_id: string;
+      tier?: number;
+      total_jobs?: number;
+      total_rating_points?: number;
+      total_revenue?: number;
+    };
+
+    if (data.agent_id) {
+      this.reputation = {
+        owner: address,
+        agent_id: data.agent_id,
+        total_jobs: data.total_jobs || 0,
+        total_rating_points: data.total_rating_points || 0,
+        total_revenue: data.total_revenue || 0,
+        tier: (data.tier || 0) as Tier,
+        created_at: 0,
+        last_updated: Date.now(),
+      };
+      return this.reputation;
+    }
+
     return null;
   }
 
@@ -474,6 +718,13 @@ export class ShadowAgentServer {
    */
   setReputation(reputation: AgentReputation): void {
     this.reputation = reputation;
+  }
+
+  /**
+   * Get the record store (for persistence/export)
+   */
+  getRecordStore(): RecordStore {
+    return this.recordStore;
   }
 
   // ═══════════════════════════════════════════════════════════════════

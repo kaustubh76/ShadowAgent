@@ -45,11 +45,23 @@ describe('ShadowAgentServer', () => {
   });
 
   describe('register', () => {
-    it('should register agent successfully with default bond', async () => {
+    it('should register agent on-chain successfully', async () => {
+      // Mock: getTransactionRecordOutputs fetch
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ agent_id: 'new-agent-id', bond_record: 'bond123' }),
+        json: () => Promise.resolve({
+          execution: {
+            transitions: [{
+              outputs: [
+                { type: 'record', value: 'record1ciphertext...' },
+                { type: 'record', value: 'record2ciphertext...' },
+              ],
+            }],
+          },
+        }),
       });
+      // Mock: notifyFacilitatorRegistration fetch (non-blocking)
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
       const agent = createAgent({
         privateKey: 'test-key',
@@ -60,38 +72,7 @@ describe('ShadowAgentServer', () => {
       const result = await agent.register('https://my-agent.com/api');
 
       expect(result.success).toBe(true);
-      expect(result.agentId).toBe('new-agent-id');
-      expect(result.bondRecord).toBe('bond123');
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3000/agents/register',
-        expect.objectContaining({
-          method: 'POST',
-        })
-      );
-    });
-
-    it('should register agent with custom bond amount', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ agent_id: 'new-agent-id' }),
-      });
-
-      const agent = createAgent({
-        privateKey: 'test-key',
-        serviceType: ServiceType.Code,
-        facilitatorUrl: 'http://localhost:3000',
-      });
-
-      const result = await agent.register('https://my-agent.com/api', 20_000_000);
-
-      expect(result.success).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3000/agents/register',
-        expect.objectContaining({
-          method: 'POST',
-          body: expect.stringContaining('20000000'),
-        })
-      );
+      expect(result.txId).toBe('mock-transaction-id');
     });
 
     it('should reject bond below minimum', async () => {
@@ -101,27 +82,34 @@ describe('ShadowAgentServer', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('below minimum');
     });
-
-    it('should handle registration failure', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Address already registered' }),
-      });
-
-      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
-      const result = await agent.register('https://agent.com', 10_000_000);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Address already registered');
-    });
   });
 
   describe('unregister', () => {
-    it('should unregister agent and return bond', async () => {
+    it('should fail without records in store', async () => {
+      const agent = createAgent({
+        privateKey: 'test-key',
+        serviceType: ServiceType.Code,
+      });
+
+      const result = await agent.unregister();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Missing AgentReputation or AgentBond');
+    });
+
+    it('should unregister on-chain when records are available', async () => {
+      // Mock: getTransactionRecordOutputs for register
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ bond_returned: 10_000_000 }),
+        json: () => Promise.resolve({
+          execution: { transitions: [{ outputs: [
+            { type: 'record', value: 'rep-record-ciphertext' },
+            { type: 'record', value: 'bond-record-ciphertext' },
+          ] }] },
+        }),
       });
+      // Mock: notifyFacilitatorRegistration
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
       const agent = createAgent({
         privateKey: 'test-key',
@@ -129,23 +117,23 @@ describe('ShadowAgentServer', () => {
         facilitatorUrl: 'http://localhost:3000',
       });
 
+      // First register to populate record store
+      await agent.register('https://my-agent.com/api');
+
+      // Mock: getTransactionRecordOutputs for unregister (bond return)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          execution: { transitions: [{ outputs: [
+            { type: 'record', value: 'returned-bond-ciphertext' },
+          ] }] },
+        }),
+      });
+
       const result = await agent.unregister();
 
       expect(result.success).toBe(true);
-      expect(result.bondReturned).toBe(10_000_000);
-    });
-
-    it('should handle unregistration failure', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Agent not found' }),
-      });
-
-      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
-      const result = await agent.unregister();
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Agent not found');
+      expect(result.txId).toBe('mock-transaction-id');
     });
   });
 
@@ -201,7 +189,7 @@ describe('ShadowAgentServer', () => {
       expect(res.setHeader).toHaveBeenCalledWith('X-Job-Hash', expect.any(String));
     });
 
-    it('should accept valid payment proof', async () => {
+    it('should accept valid payment proof with on-chain verification', async () => {
       const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
       const middleware = agent.middleware();
 
@@ -215,13 +203,25 @@ describe('ShadowAgentServer', () => {
       const jobHashCall = setHeaderCalls.find((call: unknown[]) => call[0] === 'X-Job-Hash');
       const jobHash = jobHashCall?.[1] || 'test-job-hash';
 
-      // Create a valid escrow proof
+      // Mock on-chain transaction verification
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          status: 'accepted',
+          execution: {
+            transitions: [{ program: 'credits.aleo', function: 'transfer_public' }],
+          },
+        }),
+      });
+
+      // Create a valid escrow proof with transactionId for on-chain verification
       const escrowProof = Buffer.from(
         JSON.stringify({
           proof: 'valid-proof',
           nullifier: 'nullifier123',
           commitment: 'commitment456',
           amount: 100000,
+          transactionId: 'at1real_tx_id_123',
         })
       ).toString('base64');
 
@@ -299,29 +299,62 @@ describe('ShadowAgentServer', () => {
   });
 
   describe('claimEscrow', () => {
-    it('should claim escrow for valid job', async () => {
+    it('should claim escrow on-chain when escrow ciphertext is available', async () => {
       const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
 
       // Simulate creating a pending job via middleware
       const middleware = agent.middleware();
-      const req = { method: 'POST', originalUrl: '/api', headers: {} };
-      const res = {
+      const req1 = { method: 'POST', originalUrl: '/api', headers: {} };
+      const res1 = {
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
         setHeader: jest.fn(),
       };
-
-      await middleware(req as unknown as Request, res as unknown as Response, jest.fn());
+      await middleware(req1 as unknown as Request, res1 as unknown as Response, jest.fn());
 
       // Get the job hash
-      const jobHashCall = (res.setHeader as jest.Mock).mock.calls.find(
+      const jobHashCall = (res1.setHeader as jest.Mock).mock.calls.find(
         (c: unknown[]) => c[0] === 'X-Job-Hash'
       );
       const jobHash = jobHashCall?.[1];
 
       if (jobHash) {
+        // Mock on-chain verification for payment with escrow ciphertext
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            status: 'accepted',
+            execution: { transitions: [{ program: 'shadow_agent.aleo', function: 'create_escrow' }] },
+          }),
+        });
+
+        // Submit proof with escrow ciphertext
+        const proofWithCiphertext = Buffer.from(
+          JSON.stringify({
+            proof: 'proof',
+            nullifier: 'null',
+            commitment: 'commit',
+            amount: 100000,
+            transactionId: 'at1tx123',
+            escrowCiphertext: 'record1ciphertext...',
+          })
+        ).toString('base64');
+
+        const req2 = {
+          method: 'POST',
+          originalUrl: '/api',
+          headers: {
+            'x-escrow-proof': proofWithCiphertext,
+            'x-job-hash': jobHash,
+          },
+        };
+        const res2 = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn(), statusCode: 200, send: jest.fn().mockReturnThis() };
+        await middleware(req2 as unknown as Request, res2 as unknown as Response, jest.fn());
+
+        // Now claim
         const result = await agent.claimEscrow(jobHash);
         expect(result.success).toBe(true);
+        expect(result.txId).toBe('mock-transaction-id');
       }
     });
 
@@ -331,6 +364,27 @@ describe('ShadowAgentServer', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Job not found');
+    });
+
+    it('should fail when escrow ciphertext is missing', async () => {
+      const agent = createAgent({ privateKey: 'key', serviceType: ServiceType.NLP });
+
+      // Create pending job via middleware
+      const middleware = agent.middleware();
+      const req = { method: 'POST', originalUrl: '/api', headers: {} };
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn() };
+      await middleware(req as unknown as Request, res as unknown as Response, jest.fn());
+
+      const jobHashCall = (res.setHeader as jest.Mock).mock.calls.find(
+        (c: unknown[]) => c[0] === 'X-Job-Hash'
+      );
+      const jobHash = jobHashCall?.[1];
+
+      if (jobHash) {
+        const result = await agent.claimEscrow(jobHash);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('escrow ciphertext');
+      }
     });
   });
 

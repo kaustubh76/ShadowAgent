@@ -33,9 +33,15 @@ export class Account {
 export class ProgramManager {
   constructor(_rpcUrl?: string, _keyProvider?: unknown, _recordProvider?: unknown) {}
 
+  setAccount(_account: unknown) {}
+
   async execute(..._args: unknown[]) {
     return 'mock-transaction-id';
   }
+}
+
+export class AleoKeyProviderParams {
+  constructor(_params?: unknown) {}
 }
 
 export class RecordPlaintext {
@@ -69,6 +75,10 @@ export class AleoNetworkClient {
 
   async getLatestBlock() {
     return { header: { metadata: { height: 100 } } };
+  }
+
+  async submitTransaction(_tx: string) {
+    return 'mock-transaction-id';
   }
 }
 
