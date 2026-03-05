@@ -1,20 +1,8 @@
-// Jest setup: polyfill globalThis.crypto for Node test environment
+// Polyfill globalThis.crypto for Node.js < 20 test environments
+// Node 20+ has globalThis.crypto, but some environments may not
 
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { webcrypto } from 'crypto';
 
-Object.defineProperty(globalThis, 'crypto', {
-  value: {
-    getRandomValues: (arr: Uint8Array) => {
-      const bytes = randomBytes(arr.length);
-      arr.set(bytes);
-      return arr;
-    },
-    subtle: {
-      digest: async (_algo: string, data: ArrayBuffer) => {
-        return createHash('sha256').update(Buffer.from(data)).digest();
-      },
-    },
-    randomUUID: () => randomUUID(),
-  },
-  writable: true,
-});
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}

@@ -6,12 +6,9 @@ import {
   verifyHash,
   generateAgentId,
   generateJobHash,
-  createEscrowProof,
-  createReputationProof,
   encodeBase64,
   decodeBase64,
 } from './crypto';
-import { ProofType, Tier } from './types';
 
 describe('Crypto Utilities', () => {
   describe('generateSecret', () => {
@@ -101,74 +98,9 @@ describe('Crypto Utilities', () => {
     });
   });
 
-  describe('createEscrowProof', () => {
-    it('should create a valid escrow proof structure', async () => {
-      const proof = await createEscrowProof(
-        {
-          amount: 100000,
-          recipient: 'aleo1agent123',
-          jobHash: 'job-hash-abc',
-          secretHash: 'secret-hash-xyz',
-        },
-        'test-private-key'
-      );
-
-      expect(proof).toHaveProperty('proof');
-      expect(proof).toHaveProperty('nullifier');
-      expect(proof).toHaveProperty('commitment');
-      expect(proof).toHaveProperty('amount', 100000);
-    });
-
-    it('should create unique nullifiers for different escrows', async () => {
-      const proof1 = await createEscrowProof(
-        { amount: 100, recipient: 'agent1', jobHash: 'job1', secretHash: 'hash1' },
-        'key1'
-      );
-      const proof2 = await createEscrowProof(
-        { amount: 200, recipient: 'agent2', jobHash: 'job2', secretHash: 'hash2' },
-        'key2'
-      );
-      expect(proof1.nullifier).not.toBe(proof2.nullifier);
-    });
-  });
-
-  describe('createReputationProof', () => {
-    it('should create a valid reputation proof structure', async () => {
-      const proof = await createReputationProof(
-        ProofType.Rating,
-        40, // 4.0 stars threshold
-        {
-          totalJobs: 100,
-          totalRatingPoints: 450,
-          totalRevenue: 5000000,
-          tier: Tier.Silver,
-        },
-        'test-private-key'
-      );
-
-      expect(proof).toHaveProperty('proof');
-      expect(proof).toHaveProperty('proof_type', ProofType.Rating);
-      expect(proof).toHaveProperty('threshold', 40);
-      expect(proof).toHaveProperty('tier', Tier.Silver);
-    });
-
-    it('should create proofs for different proof types', async () => {
-      const reputationData = {
-        totalJobs: 50,
-        totalRatingPoints: 240,
-        totalRevenue: 1000000,
-        tier: Tier.Bronze,
-      };
-
-      const ratingProof = await createReputationProof(ProofType.Rating, 40, reputationData, 'key');
-      const jobsProof = await createReputationProof(ProofType.Jobs, 25, reputationData, 'key');
-      const tierProof = await createReputationProof(ProofType.Tier, Tier.Bronze, reputationData, 'key');
-
-      expect(ratingProof.proof_type).toBe(ProofType.Rating);
-      expect(jobsProof.proof_type).toBe(ProofType.Jobs);
-      expect(tierProof.proof_type).toBe(ProofType.Tier);
-    });
-  });
+  // createEscrowProof and createReputationProof require real Aleo private keys
+  // (they call signData which imports @provablehq/sdk WASM).
+  // These are tested in testnet.test.ts with real faucet-funded keys.
 
   describe('encodeBase64 / decodeBase64', () => {
     it('should encode and decode objects correctly', () => {

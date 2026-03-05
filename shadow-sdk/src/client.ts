@@ -22,7 +22,6 @@ import {
   createEscrowProof,
   encodeBase64,
   decodeBase64,
-  generateAgentId,
   transferPublic,
   getBalance,
   getAddress,
