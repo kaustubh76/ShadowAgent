@@ -94,6 +94,11 @@ router.post('/policies', async (req: Request, res: Response) => {
       return;
     }
 
+    if (max_session_value <= 0 || max_single_request <= 0) {
+      res.status(400).json({ error: 'max_session_value and max_single_request must be positive' });
+      return;
+    }
+
     if (max_single_request > max_session_value) {
       res.status(400).json({ error: 'max_single_request cannot exceed max_session_value' });
       return;
@@ -232,6 +237,11 @@ router.post('/', async (req: Request, res: Response) => {
       res.status(400).json({
         error: 'Missing required fields: agent, max_total, max_per_request, rate_limit, duration_blocks',
       });
+      return;
+    }
+
+    if (max_total <= 0 || max_per_request <= 0 || rate_limit <= 0 || duration_blocks <= 0) {
+      res.status(400).json({ error: 'max_total, max_per_request, rate_limit, and duration_blocks must be positive' });
       return;
     }
 
@@ -392,7 +402,7 @@ router.post('/:sessionId/request', async (req: Request, res: Response) => {
     session.updated_at = new Date().toISOString();
 
     const receipt: SessionReceiptRecord = {
-      request_hash: request_hash || `req_${Date.now()}`,
+      request_hash: request_hash || `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       amount,
       timestamp: new Date().toISOString(),
     };
@@ -411,11 +421,16 @@ router.post('/:sessionId/settle', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
 
   await withSessionLock(sessionId, async () => {
-    const { settlement_amount } = req.body;
+    const { settlement_amount, agent } = req.body;
     const session = sessionStore.get(sessionId);
 
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!agent || agent !== session.agent) {
+      res.status(403).json({ error: 'Only the session agent can settle' });
       return;
     }
 
@@ -454,10 +469,17 @@ router.post('/:sessionId/close', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
 
   await withSessionLock(sessionId, async () => {
+    const { client } = req.body;
     const session = sessionStore.get(sessionId);
 
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    const caller = client || req.body.agent;
+    if (!caller || (caller !== session.client && caller !== session.agent)) {
+      res.status(403).json({ error: 'Only the session client or agent can close the session' });
       return;
     }
 
@@ -482,10 +504,17 @@ router.post('/:sessionId/close', async (req: Request, res: Response) => {
 // POST /sessions/:sessionId/pause - Pause session
 router.post('/:sessionId/pause', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
+  const { client } = req.body;
   const session = sessionStore.get(sessionId);
 
   if (!session) {
     res.status(404).json({ error: 'Session not found' });
+    return;
+  }
+
+  const pauseCaller = client || req.body.agent;
+  if (!pauseCaller || (pauseCaller !== session.client && pauseCaller !== session.agent)) {
+    res.status(403).json({ error: 'Only the session client or agent can pause the session' });
     return;
   }
 
@@ -506,10 +535,17 @@ router.post('/:sessionId/pause', async (req: Request, res: Response) => {
 // POST /sessions/:sessionId/resume - Resume paused session
 router.post('/:sessionId/resume', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
+  const { client } = req.body;
   const session = sessionStore.get(sessionId);
 
   if (!session) {
     res.status(404).json({ error: 'Session not found' });
+    return;
+  }
+
+  const resumeCaller = client || req.body.agent;
+  if (!resumeCaller || (resumeCaller !== session.client && resumeCaller !== session.agent)) {
+    res.status(403).json({ error: 'Only the session client or agent can resume the session' });
     return;
   }
 

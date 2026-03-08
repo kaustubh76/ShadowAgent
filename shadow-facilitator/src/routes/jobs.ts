@@ -149,12 +149,20 @@ router.patch('/:jobId', jobLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  const { status, escrow_status } = req.body;
+  const { status, escrow_status, caller } = req.body;
+
+  // Verify caller is either the job's client or agent
+  if (!caller || (caller !== job.client && caller !== job.agent)) {
+    res.status(403).json({ error: 'Caller must be the job client or agent' });
+    return;
+  }
 
   const validStatusTransitions: Record<string, string[]> = {
     'draft': ['open', 'cancelled'],
     'open': ['in_progress', 'cancelled'],
     'in_progress': ['completed', 'cancelled'],
+    'completed': [],
+    'cancelled': [],
   };
 
   if (status) {

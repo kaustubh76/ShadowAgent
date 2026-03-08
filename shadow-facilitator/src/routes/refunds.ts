@@ -43,6 +43,16 @@ router.post('/', refundLimiter, async (req: Request, res: Response) => {
       return;
     }
 
+    if (total_amount <= 0) {
+      res.status(400).json({ error: 'Total amount must be positive' });
+      return;
+    }
+
+    if (agent_amount < 0) {
+      res.status(400).json({ error: 'Agent amount cannot be negative' });
+      return;
+    }
+
     if (agent_amount > total_amount) {
       res.status(400).json({ error: 'Agent amount cannot exceed total amount' });
       return;
@@ -108,10 +118,16 @@ router.get('/', async (req: Request, res: Response) => {
 // POST /refunds/:jobHash/accept - Agent accepts refund proposal
 router.post('/:jobHash/accept', async (req: Request, res: Response) => {
   const { jobHash } = req.params;
+  const { agent_id } = req.body;
   const proposal = refundStore.get(jobHash);
 
   if (!proposal) {
     res.status(404).json({ error: 'Refund proposal not found' });
+    return;
+  }
+
+  if (!agent_id || agent_id !== proposal.agent) {
+    res.status(403).json({ error: 'Only the assigned agent can accept this refund' });
     return;
   }
 
@@ -132,10 +148,16 @@ router.post('/:jobHash/accept', async (req: Request, res: Response) => {
 // POST /refunds/:jobHash/reject - Agent rejects refund proposal
 router.post('/:jobHash/reject', async (req: Request, res: Response) => {
   const { jobHash } = req.params;
+  const { agent_id } = req.body;
   const proposal = refundStore.get(jobHash);
 
   if (!proposal) {
     res.status(404).json({ error: 'Refund proposal not found' });
+    return;
+  }
+
+  if (!agent_id || agent_id !== proposal.agent) {
+    res.status(403).json({ error: 'Only the assigned agent can reject this refund' });
     return;
   }
 

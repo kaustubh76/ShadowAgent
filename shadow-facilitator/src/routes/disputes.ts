@@ -123,11 +123,16 @@ router.get('/', async (req: Request, res: Response) => {
 // POST /disputes/:jobHash/respond - Agent responds with counter-evidence
 router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
-  const { evidence_hash } = req.body;
+  const { evidence_hash, agent_id } = req.body;
   const dispute = disputeStore.get(jobHash);
 
   if (!dispute) {
     res.status(404).json({ error: 'Dispute not found' });
+    return;
+  }
+
+  if (!agent_id || agent_id !== dispute.agent) {
+    res.status(403).json({ error: 'Only the dispute agent can respond' });
     return;
   }
 
@@ -152,9 +157,17 @@ router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res:
 });
 
 // POST /disputes/:jobHash/resolve - Admin resolves dispute
+const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS || 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+
 router.post('/:jobHash/resolve', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
-  const { agent_percentage } = req.body;
+  const { agent_percentage, admin_address } = req.body;
+
+  if (!admin_address || admin_address !== ADMIN_ADDRESS) {
+    res.status(403).json({ error: 'Only the admin can resolve disputes' });
+    return;
+  }
+
   const dispute = disputeStore.get(jobHash);
 
   if (!dispute) {
