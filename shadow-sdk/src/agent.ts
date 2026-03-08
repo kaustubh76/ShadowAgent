@@ -135,53 +135,75 @@ export class ShadowAgentServer {
       return { success: false, error: 'Private key required for on-chain registration' };
     }
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_PROGRAM,
-      'register_agent',
-      [
-        `${this.config.serviceType}u8`,
-        `${endpointHash}field`,
-        `${bondAmount}u64`,
-      ],
-    );
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_PROGRAM,
+        'register_agent',
+        [
+          `${this.config.serviceType}u8`,
+          `${endpointHash}field`,
+          `${bondAmount}u64`,
+        ],
+      );
 
-    // Wait for confirmation
-    const confirmation = await waitForTransaction(txId, 12, 5000);
+      // Wait for confirmation
+      const confirmation = await waitForTransaction(txId, 12, 5000);
 
-    if (!confirmation.confirmed) {
-      return { success: false, error: confirmation.error || 'Transaction not confirmed' };
+      if (!confirmation.confirmed) {
+        return { success: false, error: confirmation.error || 'Transaction not confirmed' };
+      }
+
+      // Extract and store output records (AgentReputation, AgentBond)
+      const recordOutputs = await getTransactionRecordOutputs(txId);
+      const address = await getAddress(this.config.privateKey);
+
+      if (recordOutputs.length >= 2) {
+        this.recordStore.store({
+          key: `${txId}:0`,
+          programId: SHADOW_AGENT_PROGRAM,
+          recordType: 'AgentReputation',
+          ciphertext: recordOutputs[0],
+          owner: address,
+          createdAt: Date.now(),
+          consumed: false,
+        });
+        this.recordStore.store({
+          key: `${txId}:1`,
+          programId: SHADOW_AGENT_PROGRAM,
+          recordType: 'AgentBond',
+          ciphertext: recordOutputs[1],
+          owner: address,
+          createdAt: Date.now(),
+          consumed: false,
+        });
+      }
+
+      // Notify facilitator for indexing (non-blocking)
+      this.notifyFacilitatorRegistration(endpointHash, bondAmount, txId).catch(() => {});
+
+      return { success: true, agentId: this.agentId, txId };
+    } catch (onChainError) {
+      try {
+        const address = await getAddress(this.config.privateKey!);
+        const res = await fetch(`${this.config.facilitatorUrl}/agents/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address, service_type: this.config.serviceType,
+            endpoint_hash: endpointHash, bond_amount: bondAmount,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string; agent_id?: string };
+        return { success: true, agentId: result.agent_id || this.agentId, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain registration failed' };
+      }
     }
-
-    // Extract and store output records (AgentReputation, AgentBond)
-    const recordOutputs = await getTransactionRecordOutputs(txId);
-    const address = await getAddress(this.config.privateKey);
-
-    if (recordOutputs.length >= 2) {
-      this.recordStore.store({
-        key: `${txId}:0`,
-        programId: SHADOW_AGENT_PROGRAM,
-        recordType: 'AgentReputation',
-        ciphertext: recordOutputs[0],
-        owner: address,
-        createdAt: Date.now(),
-        consumed: false,
-      });
-      this.recordStore.store({
-        key: `${txId}:1`,
-        programId: SHADOW_AGENT_PROGRAM,
-        recordType: 'AgentBond',
-        ciphertext: recordOutputs[1],
-        owner: address,
-        createdAt: Date.now(),
-        consumed: false,
-      });
-    }
-
-    // Notify facilitator for indexing (non-blocking)
-    this.notifyFacilitatorRegistration(endpointHash, bondAmount, txId).catch(() => {});
-
-    return { success: true, agentId: this.agentId, txId };
   }
 
   /**
@@ -192,18 +214,22 @@ export class ShadowAgentServer {
     bondAmount: number,
     txId: string,
   ): Promise<void> {
-    const address = await getAddress(this.config.privateKey);
-    await fetch(`${this.config.facilitatorUrl}/agents/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        address,
-        service_type: this.config.serviceType,
-        endpoint_hash: endpointHash,
-        bond_amount: bondAmount,
-        tx_id: txId,
-      }),
-    });
+    try {
+      const address = await getAddress(this.config.privateKey);
+      await fetch(`${this.config.facilitatorUrl}/agents/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address,
+          service_type: this.config.serviceType,
+          endpoint_hash: endpointHash,
+          bond_amount: bondAmount,
+          tx_id: txId,
+        }),
+      });
+    } catch (error) {
+      console.warn('Failed to notify facilitator of registration:', error instanceof Error ? error.message : error);
+    }
   }
 
   /**
@@ -224,36 +250,54 @@ export class ShadowAgentServer {
       return { success: false, error: 'Missing AgentReputation or AgentBond records. Register first or import records.' };
     }
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_PROGRAM,
-      'unregister_agent',
-      [repRecord.ciphertext, bondRecord.ciphertext],
-    );
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_PROGRAM,
+        'unregister_agent',
+        [repRecord.ciphertext, bondRecord.ciphertext],
+      );
 
-    // Mark old records as consumed
-    this.recordStore.markConsumed(repRecord.key);
-    this.recordStore.markConsumed(bondRecord.key);
+      // Mark old records as consumed
+      this.recordStore.markConsumed(repRecord.key);
+      this.recordStore.markConsumed(bondRecord.key);
 
-    // Wait for confirmation and extract returned bond record
-    const confirmation = await waitForTransaction(txId, 12, 5000);
-    if (confirmation.confirmed) {
-      const outputs = await getTransactionRecordOutputs(txId);
-      if (outputs.length >= 1) {
-        this.recordStore.store({
-          key: `${txId}:0`,
-          programId: SHADOW_AGENT_PROGRAM,
-          recordType: 'AgentBond',
-          ciphertext: outputs[0],
-          owner: address,
-          createdAt: Date.now(),
-          consumed: false,
-          metadata: { returned: true },
+      // Wait for confirmation and extract returned bond record
+      const confirmation = await waitForTransaction(txId, 12, 5000);
+      if (confirmation.confirmed) {
+        const outputs = await getTransactionRecordOutputs(txId);
+        if (outputs.length >= 1) {
+          this.recordStore.store({
+            key: `${txId}:0`,
+            programId: SHADOW_AGENT_PROGRAM,
+            recordType: 'AgentBond',
+            ciphertext: outputs[0],
+            owner: address,
+            createdAt: Date.now(),
+            consumed: false,
+            metadata: { returned: true },
+          });
+        }
+      }
+
+      return { success: true, txId };
+    } catch (onChainError) {
+      try {
+        const res = await fetch(`${this.config.facilitatorUrl}/agents/unregister`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_id: this.agentId, address }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain unregistration failed' };
       }
     }
-
-    return { success: true, txId };
   }
 
   /**
@@ -324,7 +368,7 @@ export class ShadowAgentServer {
       const paymentTerms: PaymentTerms = {
         price,
         network: `aleo:${this.config.network}`,
-        address: this.agentId, // In production, this would be the actual Aleo address
+        address: await getAddress(this.config.privateKey),
         escrow_required: true,
         secret_hash: secretHash,
         deadline_blocks: DEFAULT_DEADLINE_BLOCKS,
@@ -450,18 +494,22 @@ export class ShadowAgentServer {
     // secret_hash was computed with BHP256::hash_to_field (not SHA-256)
     const secretField = `${BigInt('0x' + pendingJob.secret.slice(0, 16))}field`;
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_PROGRAM,
-      'claim_escrow',
-      [
-        pendingJob.clientProof.escrowCiphertext,
-        secretField,
-      ],
-    );
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_PROGRAM,
+        'claim_escrow',
+        [
+          pendingJob.clientProof.escrowCiphertext,
+          secretField,
+        ],
+      );
 
-    this.pendingJobs.delete(jobHash);
-    return { success: true, txId };
+      this.pendingJobs.delete(jobHash);
+      return { success: true, txId };
+    } catch (onChainError) {
+      return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain escrow claim failed' };
+    }
   }
 
   /**
@@ -523,44 +571,74 @@ export class ShadowAgentServer {
       return { success: false, error: 'Missing AgentReputation record. Register first or import records.' };
     }
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_PROGRAM,
-      'update_reputation',
-      [repRecord.ciphertext, ratingRecord.ratingRecordCiphertext],
-    );
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_PROGRAM,
+        'update_reputation',
+        [repRecord.ciphertext, ratingRecord.ratingRecordCiphertext],
+      );
 
-    // Mark old reputation record consumed
-    this.recordStore.markConsumed(repRecord.key);
+      // Mark old reputation record consumed
+      this.recordStore.markConsumed(repRecord.key);
 
-    // Wait for confirmation and store new reputation record
-    const confirmation = await waitForTransaction(txId, 12, 5000);
-    if (confirmation.confirmed) {
-      const outputs = await getTransactionRecordOutputs(txId);
-      if (outputs.length >= 1) {
-        this.recordStore.store({
-          key: `${txId}:0`,
-          programId: SHADOW_AGENT_PROGRAM,
-          recordType: 'AgentReputation',
-          ciphertext: outputs[0],
-          owner: address,
-          createdAt: Date.now(),
-          consumed: false,
+      // Wait for confirmation and store new reputation record
+      const confirmation = await waitForTransaction(txId, 12, 5000);
+      if (confirmation.confirmed) {
+        const outputs = await getTransactionRecordOutputs(txId);
+        if (outputs.length >= 1) {
+          this.recordStore.store({
+            key: `${txId}:0`,
+            programId: SHADOW_AGENT_PROGRAM,
+            recordType: 'AgentReputation',
+            ciphertext: outputs[0],
+            owner: address,
+            createdAt: Date.now(),
+            consumed: false,
+          });
+        }
+      }
+
+      // Update local cache
+      this.reputation.total_jobs += 1;
+      this.reputation.total_rating_points += ratingRecord.rating;
+      this.reputation.total_revenue += ratingRecord.payment_amount;
+      this.reputation.tier = this.calculateTier(
+        this.reputation.total_jobs,
+        this.reputation.total_revenue
+      );
+      this.reputation.last_updated = Date.now();
+
+      return { success: true, newTier: this.reputation.tier, txId };
+    } catch (onChainError) {
+      try {
+        const res = await fetch(`${this.config.facilitatorUrl}/agents/${address}/rating`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rating: ratingRecord.rating,
+            payment_amount: ratingRecord.payment_amount,
+          }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        // Update local cache even on facilitator fallback
+        this.reputation.total_jobs += 1;
+        this.reputation.total_rating_points += ratingRecord.rating;
+        this.reputation.total_revenue += ratingRecord.payment_amount;
+        this.reputation.tier = this.calculateTier(
+          this.reputation.total_jobs,
+          this.reputation.total_revenue
+        );
+        this.reputation.last_updated = Date.now();
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, newTier: this.reputation.tier, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain reputation update failed' };
       }
     }
-
-    // Update local cache
-    this.reputation.total_jobs += 1;
-    this.reputation.total_rating_points += ratingRecord.rating;
-    this.reputation.total_revenue += ratingRecord.payment_amount;
-    this.reputation.tier = this.calculateTier(
-      this.reputation.total_jobs,
-      this.reputation.total_revenue
-    );
-    this.reputation.last_updated = Date.now();
-
-    return { success: true, newTier: this.reputation.tier, txId };
   }
 
   /**
@@ -589,42 +667,46 @@ export class ShadowAgentServer {
       ? await generateAgentId(newEndpointUrl)
       : '0';
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_PROGRAM,
-      'update_listing',
-      [
-        repRecord.ciphertext,
-        `${serviceType}u8`,
-        `${endpointHash}field`,
-        active.toString(),
-      ],
-    );
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_PROGRAM,
+        'update_listing',
+        [
+          repRecord.ciphertext,
+          `${serviceType}u8`,
+          `${endpointHash}field`,
+          active.toString(),
+        ],
+      );
 
-    // Mark old record consumed, store new one
-    this.recordStore.markConsumed(repRecord.key);
+      // Mark old record consumed, store new one
+      this.recordStore.markConsumed(repRecord.key);
 
-    const confirmation = await waitForTransaction(txId, 12, 5000);
-    if (confirmation.confirmed) {
-      const outputs = await getTransactionRecordOutputs(txId);
-      if (outputs.length >= 1) {
-        this.recordStore.store({
-          key: `${txId}:0`,
-          programId: SHADOW_AGENT_PROGRAM,
-          recordType: 'AgentReputation',
-          ciphertext: outputs[0],
-          owner: address,
-          createdAt: Date.now(),
-          consumed: false,
-        });
+      const confirmation = await waitForTransaction(txId, 12, 5000);
+      if (confirmation.confirmed) {
+        const outputs = await getTransactionRecordOutputs(txId);
+        if (outputs.length >= 1) {
+          this.recordStore.store({
+            key: `${txId}:0`,
+            programId: SHADOW_AGENT_PROGRAM,
+            recordType: 'AgentReputation',
+            ciphertext: outputs[0],
+            owner: address,
+            createdAt: Date.now(),
+            consumed: false,
+          });
+        }
       }
-    }
 
-    if (newServiceType !== undefined) {
-      this.config.serviceType = newServiceType;
-    }
+      if (newServiceType !== undefined) {
+        this.config.serviceType = newServiceType;
+      }
 
-    return { success: true, txId };
+      return { success: true, txId };
+    } catch (onChainError) {
+      return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain listing update failed' };
+    }
   }
 
   /**
