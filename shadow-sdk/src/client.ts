@@ -310,7 +310,6 @@ export class ShadowAgentClient {
     const secretHash = await hashSecret(secret);
 
     // Store secret locally for later claim verification
-    // In production, this would be persisted securely
     this.escrowSecrets.set(jobHash, secret);
 
     // Create escrow proof (includes signature)
@@ -341,23 +340,48 @@ export class ShadowAgentClient {
     }
 
     // Execute real transfer_public to the agent's address
-    const txId = await transferPublic(
-      this.config.privateKey,
-      paymentTerms.address,
-      paymentTerms.price,
-      fee
-    );
+    try {
+      const txId = await transferPublic(
+        this.config.privateKey,
+        paymentTerms.address,
+        paymentTerms.price,
+        fee
+      );
 
-    // Store transaction ID in the proof
-    (proof as EscrowProof).transactionId = txId;
+      // Store transaction ID in the proof
+      (proof as EscrowProof).transactionId = txId;
 
-    // Wait for confirmation
-    const confirmation = await waitForTransaction(txId, 12, 5000);
-    if (!confirmation.confirmed) {
-      throw new Error(`Escrow transaction not confirmed: ${confirmation.error}`);
+      // Wait for confirmation
+      const confirmation = await waitForTransaction(txId, 12, 5000);
+      if (!confirmation.confirmed) {
+        throw new Error(`Escrow transaction not confirmed: ${confirmation.error}`);
+      }
+
+      return proof;
+    } catch (onChainError) {
+      // Facilitator fallback
+      try {
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/escrows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent: paymentTerms.address,
+            amount: paymentTerms.price,
+            job_hash: jobHash,
+            secret_hash: secretHash,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(err.error || 'Facilitator fallback failed');
+        }
+        const result = await res.json() as { tx_id?: string };
+        (proof as EscrowProof).transactionId = result.tx_id;
+        return proof;
+      } catch (fallbackError) {
+        throw onChainError instanceof Error ? onChainError : new Error('On-chain escrow creation failed');
+      }
     }
-
-    return proof;
   }
 
   // Store escrow secrets for HTLC claims
@@ -406,23 +430,46 @@ export class ShadowAgentClient {
     }
 
     // Execute real transfer as burn — Sybil resistance via proof-of-stake
-    const txId = await transferPublic(
-      this.config.privateKey,
-      agentAddress,
-      RATING_BURN_COST,
-      fee
-    );
+    try {
+      const txId = await transferPublic(
+        this.config.privateKey,
+        agentAddress,
+        RATING_BURN_COST,
+        fee
+      );
 
-    // Wait for confirmation
-    const confirmation = await waitForTransaction(txId, 12, 5000);
-    if (!confirmation.confirmed) {
-      return { success: false, error: `Rating burn not confirmed: ${confirmation.error}` };
+      // Wait for confirmation
+      const confirmation = await waitForTransaction(txId, 12, 5000);
+      if (!confirmation.confirmed) {
+        return { success: false, error: `Rating burn not confirmed: ${confirmation.error}` };
+      }
+
+      // Notify facilitator for indexing (non-blocking)
+      this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch(() => {});
+
+      return { success: true, txId };
+    } catch (onChainError) {
+      // Facilitator fallback
+      try {
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/agents/${agentAddress}/rating`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            job_hash: jobHash,
+            rating: scaledRating,
+            payment_amount: paymentAmount,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain rating submission failed' };
+      }
     }
-
-    // Notify facilitator for indexing (non-blocking)
-    this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch(() => {});
-
-    return { success: true, txId };
   }
 
   /**
@@ -559,6 +606,10 @@ export class ShadowAgentClient {
     agentAmount: number,
     jobHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (agentAmount < 0) {
+      return { success: false, error: 'Agent amount cannot be negative' };
+    }
+
     if (agentAmount > totalAmount) {
       return { success: false, error: 'Agent amount cannot exceed total amount' };
     }
@@ -567,14 +618,31 @@ export class ShadowAgentClient {
       return { success: false, error: 'Private key required for partial refund proposal' };
     }
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_EXT_PROGRAM,
-      'propose_partial_refund',
-      [agent, `${totalAmount}u64`, `${agentAmount}u64`, jobHash],
-    );
-
-    return { success: true, txId };
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'propose_partial_refund',
+        [agent, `${totalAmount}u64`, `${agentAmount}u64`, jobHash],
+      );
+      return { success: true, txId };
+    } catch (onChainError) {
+      try {
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/refunds`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent, total_amount: totalAmount, agent_amount: agentAmount, job_hash: jobHash }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain execution failed' };
+      }
+    }
   }
 
   /**
@@ -617,14 +685,31 @@ export class ShadowAgentClient {
 
     const adminAddress = this.config.adminAddress;
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_EXT_PROGRAM,
-      'open_dispute',
-      [agent, jobHash, `${escrowAmount}u64`, evidenceHash, adminAddress],
-    );
-
-    return { success: true, txId };
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'open_dispute',
+        [agent, jobHash, `${escrowAmount}u64`, evidenceHash, adminAddress],
+      );
+      return { success: true, txId };
+    } catch (onChainError) {
+      try {
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/disputes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent, job_hash: jobHash, escrow_amount: escrowAmount, evidence_hash: evidenceHash }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain execution failed' };
+      }
+    }
   }
 
   /**
@@ -672,24 +757,45 @@ export class ShadowAgentClient {
     // Store secret for later use
     this.escrowSecrets.set(jobHash, secret);
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_EXT_PROGRAM,
-      'create_multisig_escrow',
-      [
-        agent,
-        `${amount}u64`,
-        jobHash,
-        secretHash,
-        `${deadline}u64`,
-        config.signers[0],
-        config.signers[1],
-        config.signers[2],
-        `${config.required_signatures}u8`,
-      ],
-    );
-
-    return { success: true, txId, secretHash };
+    try {
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_EXT_PROGRAM,
+        'create_multisig_escrow',
+        [
+          agent,
+          `${amount}u64`,
+          jobHash,
+          secretHash,
+          `${deadline}u64`,
+          config.signers[0],
+          config.signers[1],
+          config.signers[2],
+          `${config.required_signatures}u8`,
+        ],
+      );
+      return { success: true, txId, secretHash };
+    } catch (onChainError) {
+      try {
+        const senderAddress = await getAddress(this.config.privateKey!);
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/escrows/multisig`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent, amount, job_hash: jobHash, secret_hash: secretHash, deadline,
+            signers: config.signers, required_signatures: config.required_signatures, owner: senderAddress,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id, secretHash };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain execution failed' };
+      }
+    }
   }
 
   /**
@@ -734,24 +840,45 @@ export class ShadowAgentClient {
 
     const sessionId = generateSessionId();
 
-    // Fetch current block height for on-chain verification
-    const blockHeight = await this.getCurrentBlockHeight();
+    try {
+      // Fetch current block height for on-chain verification
+      const blockHeight = await this.getCurrentBlockHeight();
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_SESSION_PROGRAM,
-      'create_session',
-      [
-        agent,
-        `${maxTotal}u64`,
-        `${maxPerRequest}u64`,
-        `${rateLimit}u64`,
-        `${durationBlocks}u64`,
-        `${blockHeight}u64`,
-      ],
-    );
-
-    return { success: true, sessionId, txId };
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_SESSION_PROGRAM,
+        'create_session',
+        [
+          agent,
+          `${maxTotal}u64`,
+          `${maxPerRequest}u64`,
+          `${rateLimit}u64`,
+          `${durationBlocks}u64`,
+          `${blockHeight}u64`,
+        ],
+      );
+      return { success: true, sessionId, txId };
+    } catch (onChainError) {
+      try {
+        const senderAddress = await getAddress(this.config.privateKey!);
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent, client: senderAddress, max_total: maxTotal, max_per_request: maxPerRequest,
+            rate_limit: rateLimit, duration_blocks: durationBlocks, session_id: sessionId,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string; session_id?: string };
+        return { success: true, sessionId: result.session_id || sessionId, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain execution failed' };
+      }
+    }
   }
 
   /**
@@ -946,23 +1073,44 @@ export class ShadowAgentClient {
       return { success: false, error: 'maxSingleRequest cannot exceed maxSessionValue' };
     }
 
-    const blockHeight = await this.getCurrentBlockHeight();
+    try {
+      const blockHeight = await this.getCurrentBlockHeight();
 
-    const txId = await executeProgram(
-      this.config.privateKey,
-      SHADOW_AGENT_SESSION_PROGRAM,
-      'create_policy',
-      [
-        `${maxSessionValue}u64`,
-        `${maxSingleRequest}u64`,
-        `${allowedTiers}u8`,
-        `${allowedCategories}u64`,
-        requireProofs.toString(),
-        `${blockHeight}u64`,
-      ],
-    );
-
-    return { success: true, txId };
+      const txId = await executeProgram(
+        this.config.privateKey,
+        SHADOW_AGENT_SESSION_PROGRAM,
+        'create_policy',
+        [
+          `${maxSessionValue}u64`,
+          `${maxSingleRequest}u64`,
+          `${allowedTiers}u8`,
+          `${allowedCategories}u64`,
+          requireProofs.toString(),
+          `${blockHeight}u64`,
+        ],
+      );
+      return { success: true, txId };
+    } catch (onChainError) {
+      try {
+        const senderAddress = await getAddress(this.config.privateKey!);
+        const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/sessions/policies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner: senderAddress, max_session_value: maxSessionValue, max_single_request: maxSingleRequest,
+            allowed_tiers: allowedTiers, allowed_categories: allowedCategories, require_proofs: requireProofs,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { success: false, error: err.error || 'Facilitator fallback failed' };
+        }
+        const result = await res.json() as { tx_id?: string };
+        return { success: true, txId: result.tx_id };
+      } catch {
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain execution failed' };
+      }
+    }
   }
 
   /**
