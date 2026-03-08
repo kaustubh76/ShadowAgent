@@ -37,23 +37,30 @@ const multisigStore = new TTLStore<MultiSigEscrowRecord>({
   defaultTTLMs: 30 * 86_400_000,
 });
 
-// Per-job mutex to prevent race conditions on concurrent approvals
-const approvalLocks = new Map<string, Promise<void>>();
+// Per-job queued mutex to prevent race conditions on concurrent approvals
+const approvalLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
 
 async function withJobLock<T>(jobHash: string, fn: () => Promise<T>): Promise<T> {
-  // Wait for any existing lock on this job
-  const existing = approvalLocks.get(jobHash);
-  if (existing) await existing;
+  if (!approvalLocks.has(jobHash)) {
+    approvalLocks.set(jobHash, { queue: [], active: false });
+  }
+  const lock = approvalLocks.get(jobHash)!;
 
-  let release: () => void;
-  const lock = new Promise<void>(resolve => { release = resolve; });
-  approvalLocks.set(jobHash, lock);
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
 
   try {
     return await fn();
   } finally {
-    release!();
-    approvalLocks.delete(jobHash);
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) {
+      next();
+    } else {
+      approvalLocks.delete(jobHash);
+    }
   }
 }
 
