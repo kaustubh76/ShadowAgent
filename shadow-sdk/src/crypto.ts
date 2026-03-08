@@ -430,6 +430,7 @@ export async function getBalance(address: string): Promise<number> {
   const response = await fetch(balanceUrl);
 
   if (!response.ok) {
+    console.warn(`Failed to fetch balance for ${address}: ${response.statusText}`);
     return 0;
   }
 
