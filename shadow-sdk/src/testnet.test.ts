@@ -46,7 +46,7 @@ const hasKeys = Boolean(CLIENT_KEY && AGENT_KEY);
 const hasFacilitator = Boolean(process.env.FACILITATOR_URL);
 
 const describeTestnet = hasKeys ? describe : describe.skip;
-const describeFacilitator = hasFacilitator ? describe : describe.skip;
+const describeFacilitator = (hasFacilitator && hasKeys) ? describe : describe.skip;
 
 // ═══════════════════════════════════════════════════════════════════
 // 1. Crypto — Pure functions (always run, no keys needed)
@@ -439,7 +439,7 @@ describeFacilitator('Session lifecycle — Real facilitator', () => {
         duration_blocks: 1000,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as { session: { session_id: string } };
     console.log('Create session response:', body);
     expect(res.status).toBe(201);
     expect(body.session).toBeDefined();
@@ -526,7 +526,7 @@ describeFacilitator('Dispute + Refund flow — Real facilitator', () => {
         evidence_hash: 'evidence-hash-test-123',
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as { dispute: { status: string } };
     console.log('Open dispute response:', body);
     expect(res.status).toBe(201);
     expect(body.dispute).toBeDefined();
@@ -535,7 +535,7 @@ describeFacilitator('Dispute + Refund flow — Real facilitator', () => {
 
   test('get dispute status', async () => {
     const res = await fetch(`${FACILITATOR_URL}/disputes/${jobHash}`);
-    const body = await res.json();
+    const body = await res.json() as { job_hash: string; status: string };
     expect(res.ok).toBe(true);
     expect(body.job_hash).toBe(jobHash);
     expect(body.status).toBe('opened');
@@ -554,7 +554,7 @@ describeFacilitator('Dispute + Refund flow — Real facilitator', () => {
         job_hash: refundJobHash,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as { proposal: { status: string; agent_amount: number; client_amount: number } };
     console.log('Propose refund response:', body);
     expect(res.status).toBe(201);
     expect(body.proposal).toBeDefined();

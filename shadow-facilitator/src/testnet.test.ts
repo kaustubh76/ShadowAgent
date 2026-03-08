@@ -99,11 +99,7 @@ describe('AleoService — Real Aleo testnet', () => {
 
   test('verifyReputationProof rejects invalid proof type', async () => {
     const result = await service.verifyReputationProof({
-      owner: 'test',
       proof_type: 99,
-      threshold_met: true,
-      tier_proven: 1,
-      generated_at: Date.now(),
       proof: 'dGVzdA==',
       threshold: 1,
     });
@@ -119,7 +115,7 @@ describe('AleoService — Real Aleo testnet', () => {
 describeFacilitator('Health endpoints — Real facilitator', () => {
   test('GET /health returns ok', async () => {
     const res = await fetch(`${FACILITATOR_URL}/health`);
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Health response:', body);
     expect(res.ok).toBe(true);
     expect(body.status).toBe('ok');
@@ -127,14 +123,14 @@ describeFacilitator('Health endpoints — Real facilitator', () => {
 
   test('GET /health/ready returns readiness with blockHeight', async () => {
     const res = await fetch(`${FACILITATOR_URL}/health/ready`);
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Ready response:', body);
     expect(res.ok).toBe(true);
   }, 15_000);
 
   test('GET /health/detailed returns subsystem info', async () => {
     const res = await fetch(`${FACILITATOR_URL}/health/detailed`);
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Detailed health:', JSON.stringify(body, null, 2));
     expect(res.ok).toBe(true);
     expect(body).toHaveProperty('subsystems');
@@ -164,7 +160,7 @@ describeFacilitator('Agent routes — Real facilitator', () => {
         service_type: 3, // Code
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Register response:', body);
     expect(res.status).toBe(201);
     expect(body.success).toBe(true);
@@ -174,7 +170,7 @@ describeFacilitator('Agent routes — Real facilitator', () => {
 
   test('GET /agents searches agents', async () => {
     const res = await fetch(`${FACILITATOR_URL}/agents?limit=5`);
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log(`Search found ${body.total} agents`);
     expect(res.ok).toBe(true);
     expect(body).toHaveProperty('agents');
@@ -184,7 +180,7 @@ describeFacilitator('Agent routes — Real facilitator', () => {
 
   test('GET /agents with service_type filter', async () => {
     const res = await fetch(`${FACILITATOR_URL}/agents?service_type=3`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     // All returned agents should be Code type
     for (const agent of body.agents) {
@@ -196,7 +192,7 @@ describeFacilitator('Agent routes — Real facilitator', () => {
     if (!agentId) return;
     const res = await fetch(`${FACILITATOR_URL}/agents/${agentId}`);
     if (res.ok) {
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.agent_id).toBe(agentId);
     }
     // May be 404 if indexer hasn't cached yet — acceptable
@@ -214,7 +210,7 @@ describeFacilitator('Agent routes — Real facilitator', () => {
         payment_amount: 100_000,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Rating response:', body);
     expect(res.status).toBeLessThanOrEqual(201);
   }, 15_000);
@@ -254,7 +250,7 @@ describeFacilitator('Session routes — Real facilitator', () => {
         duration_blocks: 500,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Create session:', body);
     expect(res.status).toBe(201);
     sessionId = body.session.session_id;
@@ -263,7 +259,7 @@ describeFacilitator('Session routes — Real facilitator', () => {
 
   test('GET /sessions/:id returns session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.session_id).toBe(sessionId);
     expect(body.status).toBe('active');
@@ -276,7 +272,7 @@ describeFacilitator('Session routes — Real facilitator', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount: 50_000, request_hash: 'hash-1' }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.session.spent).toBe(50_000);
   }, 15_000);
@@ -294,9 +290,9 @@ describeFacilitator('Session routes — Real facilitator', () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}/settle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settlement_amount: 50_000 }),
+      body: JSON.stringify({ settlement_amount: 50_000, agent: agentAddr }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     console.log('Settlement:', body);
   }, 15_000);
@@ -304,41 +300,47 @@ describeFacilitator('Session routes — Real facilitator', () => {
   test('POST /sessions/:id/pause pauses session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}/pause`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: clientAddr }),
     });
     expect(res.ok).toBe(true);
 
     const status = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}`);
-    const body = await status.json();
+    const body = await status.json() as any;
     expect(body.status).toBe('paused');
   }, 15_000);
 
   test('POST /sessions/:id/resume resumes session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}/resume`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: clientAddr }),
     });
     expect(res.ok).toBe(true);
 
     const status = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}`);
-    const body = await status.json();
+    const body = await status.json() as any;
     expect(body.status).toBe('active');
   }, 15_000);
 
   test('POST /sessions/:id/close closes session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}/close`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: clientAddr }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     console.log('Close session:', body);
 
     const status = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}`);
-    const statusBody = await status.json();
+    const statusBody = await status.json() as any;
     expect(statusBody.status).toBe('closed');
   }, 15_000);
 
   test('GET /sessions lists sessions', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions?client=${clientAddr}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(Array.isArray(body)).toBe(true);
   }, 15_000);
@@ -365,7 +367,7 @@ describeFacilitator('Policy routes — Real facilitator', () => {
         require_proofs: false,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Create policy:', body);
     expect(res.status).toBe(201);
     policyId = body.policy.policy_id;
@@ -374,7 +376,7 @@ describeFacilitator('Policy routes — Real facilitator', () => {
 
   test('GET /sessions/policies lists policies', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/policies?owner=${owner}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThan(0);
@@ -393,7 +395,7 @@ describeFacilitator('Policy routes — Real facilitator', () => {
         duration_blocks: 500,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Session from policy:', body);
     expect(res.status).toBe(201);
     expect(body.session).toBeDefined();
@@ -420,7 +422,7 @@ describeFacilitator('Dispute routes — Real facilitator', () => {
         evidence_hash: 'evidence-' + Date.now(),
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Open dispute:', body);
     expect(res.status).toBe(201);
     expect(body.dispute.status).toBe('opened');
@@ -431,24 +433,25 @@ describeFacilitator('Dispute routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        agent_id: 'aleo1disputeagent',
         evidence_hash: 'counter-evidence-' + Date.now(),
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Dispute response:', body);
     expect(res.ok).toBe(true);
   }, 15_000);
 
   test('GET /disputes/:jobHash returns dispute', async () => {
     const res = await fetch(`${FACILITATOR_URL}/disputes/${jobHash}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.job_hash).toBe(jobHash);
   }, 15_000);
 
   test('GET /disputes lists disputes', async () => {
     const res = await fetch(`${FACILITATOR_URL}/disputes`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(Array.isArray(body)).toBe(true);
   }, 15_000);
@@ -474,7 +477,7 @@ describeFacilitator('Refund routes — Real facilitator', () => {
         job_hash: jobHash,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Propose refund:', body);
     expect(res.status).toBe(201);
     expect(body.proposal.status).toBe('proposed');
@@ -484,7 +487,7 @@ describeFacilitator('Refund routes — Real facilitator', () => {
 
   test('GET /refunds/:jobHash returns proposal', async () => {
     const res = await fetch(`${FACILITATOR_URL}/refunds/${jobHash}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.job_hash).toBe(jobHash);
   }, 15_000);
@@ -492,8 +495,10 @@ describeFacilitator('Refund routes — Real facilitator', () => {
   test('POST /refunds/:jobHash/accept accepts proposal', async () => {
     const res = await fetch(`${FACILITATOR_URL}/refunds/${jobHash}/accept`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'aleo1refundagent' }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Accept refund:', body);
     expect(res.ok).toBe(true);
     expect(body.proposal.status).toBe('accepted');
@@ -515,8 +520,10 @@ describeFacilitator('Refund routes — Real facilitator', () => {
 
     const res = await fetch(`${FACILITATOR_URL}/refunds/${rejectHash}/reject`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'aleo1refundagent2' }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.proposal.status).toBe('rejected');
   }, 15_000);
@@ -545,7 +552,7 @@ describeFacilitator('Multi-sig escrow routes — Real facilitator', () => {
         required_signatures: 2,
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Create multi-sig:', body);
     expect(res.status).toBe(201);
     expect(body.escrow).toBeDefined();
@@ -553,7 +560,7 @@ describeFacilitator('Multi-sig escrow routes — Real facilitator', () => {
 
   test('GET /escrows/multisig/:jobHash returns escrow', async () => {
     const res = await fetch(`${FACILITATOR_URL}/escrows/multisig/${jobHash}`);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.job_hash).toBe(jobHash);
     expect(body.required_sigs).toBe(2);
@@ -565,7 +572,7 @@ describeFacilitator('Multi-sig escrow routes — Real facilitator', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ signer_address: 'aleo1signer1' }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     console.log('Approve escrow:', body);
     expect(res.ok).toBe(true);
     expect(body.escrow.sig_count).toBe(1);
@@ -583,7 +590,7 @@ describeFacilitator('Verify routes — Real facilitator', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nullifier: 'test-nullifier-' + Date.now() }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(res.ok).toBe(true);
     expect(body.is_used).toBe(false);
   }, 15_000);
@@ -594,7 +601,7 @@ describeFacilitator('Verify routes — Real facilitator', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proof: '', nullifier: '', commitment: '' }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.valid).toBe(false);
   }, 15_000);
 
@@ -608,7 +615,7 @@ describeFacilitator('Verify routes — Real facilitator', () => {
         proof: 'dGVzdA==',
       }),
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.valid).toBe(false);
   }, 15_000);
 });
