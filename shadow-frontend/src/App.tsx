@@ -15,6 +15,7 @@ const AgentDetails = lazy(() => import('./pages/AgentDetails'));
 const DisputeCenter = lazy(() => import('./pages/DisputeCenter'));
 const TransactionHistory = lazy(() => import('./pages/TransactionHistory'));
 const JobMarketplace = lazy(() => import('./pages/JobMarketplace'));
+const TestnetDiagnostics = lazy(() => import('./pages/TestnetDiagnostics'));
 
 // 404 Page
 function NotFound() {
@@ -148,6 +149,7 @@ function App() {
               <Route path="jobs" element={<JobMarketplace />} />
               <Route path="disputes" element={<DisputeCenter />} />
               <Route path="activity" element={<TransactionHistory />} />
+              <Route path="diagnostics" element={<TestnetDiagnostics />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
