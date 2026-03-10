@@ -103,6 +103,7 @@ function DisputeTimeline({ status }: { status: DisputeInfo['status'] }) {
 }
 
 function AdminResolveForm({ dispute, onResolved }: { dispute: DisputeInfo; onResolved: () => void }) {
+  const { address } = useWalletStore();
   const toast = useToast();
   const [agentPct, setAgentPct] = useState(50);
   const [isResolving, setIsResolving] = useState(false);
@@ -113,7 +114,7 @@ function AdminResolveForm({ dispute, onResolved }: { dispute: DisputeInfo; onRes
   const handleResolve = async () => {
     setIsResolving(true);
     try {
-      const result = await resolveDispute(dispute.job_hash, agentPct);
+      const result = await resolveDispute(dispute.job_hash, agentPct, address || undefined);
       if (result.success) {
         toast.success(`Dispute resolved: Agent ${agentPct}% / Client ${100 - agentPct}%`);
         if (result.settlement) {
@@ -204,16 +205,20 @@ export default function DisputeCenter() {
         : { agent_id: address };
     fetchDisputes(params).then(data => {
       useAgentStore.getState().setDisputes(data);
+    }).catch(err => {
+      toast.error(err instanceof Error ? err.message : 'Failed to load disputes');
     });
-  }, [connected, address, role]);
+  }, [connected, address, role, toast]);
 
   // Fetch refunds when refunds tab is selected
   useEffect(() => {
     if (!connected || !address || filter !== 'refunds') return;
     fetchRefunds({ agent_id: role === 'agent' ? address : undefined }).then(data => {
       setRefunds(data);
+    }).catch(err => {
+      toast.error(err instanceof Error ? err.message : 'Failed to load refunds');
     });
-  }, [connected, address, filter, role]);
+  }, [connected, address, filter, role, toast]);
 
   const filteredDisputes = disputes.filter(d => {
     if (filter === 'open') return d.status === 'opened' || d.status === 'agent_responded';
@@ -225,7 +230,7 @@ export default function DisputeCenter() {
     if (!evidenceHash.trim()) return;
     setIsSubmitting(true);
     try {
-      const result = await respondToDispute(jobHash, evidenceHash.trim());
+      const result = await respondToDispute(jobHash, evidenceHash.trim(), address || undefined);
       if (result.success) {
         toast.success('Response submitted successfully');
         setRespondingTo(null);
@@ -250,7 +255,7 @@ export default function DisputeCenter() {
   const handleRefundAction = async (jobHash: string, action: 'accept' | 'reject') => {
     setProcessingRefund(jobHash);
     try {
-      const result = action === 'accept' ? await acceptRefund(jobHash) : await rejectRefund(jobHash);
+      const result = action === 'accept' ? await acceptRefund(jobHash, address || undefined) : await rejectRefund(jobHash, address || undefined);
       if (result.success) {
         toast.success(`Refund ${action}ed successfully`);
         // Track accepted refunds as activity

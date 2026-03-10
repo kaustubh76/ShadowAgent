@@ -34,7 +34,7 @@ export default function SessionSettleModal({ isOpen, onClose, session }: Session
     setIsSubmitting(true);
 
     try {
-      const result = await settleSession(session.session_id, microcredits);
+      const result = await settleSession(session.session_id, microcredits, session.agent);
 
       if (result.success) {
         if (result.session) {

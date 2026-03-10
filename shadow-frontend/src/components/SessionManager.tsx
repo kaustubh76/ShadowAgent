@@ -37,7 +37,7 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
   const closedCount = agentSessions.filter(s => s.status === 'closed').length;
 
   const handleClose = async (sessionId: string) => {
-    const result = await closeSession(sessionId);
+    const result = await closeSession(sessionId, address || undefined);
     if (result.success) {
       updateSession(sessionId, { status: 'closed' });
       addTransaction({ type: 'session_closed', agentId: agentAddress, amount: result.refund_amount });
@@ -45,14 +45,14 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
   };
 
   const handlePause = async (sessionId: string) => {
-    const result = await pauseSession(sessionId);
+    const result = await pauseSession(sessionId, address || undefined);
     if (result.success) {
       updateSession(sessionId, { status: 'paused' });
     }
   };
 
   const handleResume = async (sessionId: string) => {
-    const result = await resumeSession(sessionId);
+    const result = await resumeSession(sessionId, address || undefined);
     if (result.success) {
       updateSession(sessionId, { status: 'active' });
     }

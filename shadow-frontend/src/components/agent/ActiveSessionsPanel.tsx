@@ -15,7 +15,7 @@ export default function ActiveSessionsPanel({ agentAddress }: { agentAddress: st
 
   const handlePause = async (sessionId: string) => {
     setActionId(sessionId);
-    const result = await pauseSession(sessionId);
+    const result = await pauseSession(sessionId, agentAddress);
     if (result.success) {
       updateSession(sessionId, { status: 'paused' });
       toast.success('Session paused');
@@ -27,7 +27,7 @@ export default function ActiveSessionsPanel({ agentAddress }: { agentAddress: st
 
   const handleResume = async (sessionId: string) => {
     setActionId(sessionId);
-    const result = await resumeSession(sessionId);
+    const result = await resumeSession(sessionId, agentAddress);
     if (result.success) {
       updateSession(sessionId, { status: 'active' });
       toast.success('Session resumed');
@@ -39,7 +39,7 @@ export default function ActiveSessionsPanel({ agentAddress }: { agentAddress: st
 
   const handleClose = async (sessionId: string) => {
     setActionId(sessionId);
-    const result = await closeSession(sessionId);
+    const result = await closeSession(sessionId, agentAddress);
     if (result.success) {
       updateSession(sessionId, { status: 'closed' });
       addTransaction({ type: 'session_closed', agentId: agentAddress, amount: result.refund_amount });
