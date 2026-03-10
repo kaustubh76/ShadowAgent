@@ -168,14 +168,15 @@ export async function searchAgents(
     const response = await fetchWithRetry(url);
 
     if (!response.ok) {
-      return { ...EMPTY_SEARCH, limit, offset };
+      throw new Error(`Failed to search agents (${response.status})`);
     }
 
     const result = await response.json();
     setCache(url, result);
     return result;
-  } catch {
-    return { ...EMPTY_SEARCH, limit, offset };
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error('Network error searching agents');
   }
 }
 
@@ -253,12 +254,15 @@ export async function fetchDisputes(
 
     const response = await fetchWithRetry(url);
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      throw new Error(`Failed to fetch disputes (${response.status})`);
+    }
     const result = await response.json();
     setCache(url, result);
     return result;
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error('Network error fetching disputes');
   }
 }
 
@@ -307,12 +311,15 @@ export async function fetchRefunds(
 
     const response = await fetchWithRetry(url);
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      throw new Error(`Failed to fetch refunds (${response.status})`);
+    }
     const result = await response.json();
     setCache(url, result);
     return result;
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error('Network error fetching refunds');
   }
 }
 
@@ -445,14 +452,15 @@ export async function submitRating(
 // Respond to a dispute with counter-evidence
 export async function respondToDispute(
   jobHash: string,
-  evidenceHash: string
+  evidenceHash: string,
+  agentId?: string
 ): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/disputes/${jobHash}/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ evidence_hash: evidenceHash }),
+      body: JSON.stringify({ evidence_hash: evidenceHash, agent_id: agentId }),
     });
 
     const body = await response.json();
@@ -469,12 +477,15 @@ export async function respondToDispute(
 
 // Accept a partial refund proposal
 export async function acceptRefund(
-  jobHash: string
+  jobHash: string,
+  agentId?: string
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/refunds/${jobHash}/accept`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId }),
     });
 
     const body = await response.json();
@@ -491,12 +502,15 @@ export async function acceptRefund(
 
 // Reject a partial refund proposal
 export async function rejectRefund(
-  jobHash: string
+  jobHash: string,
+  agentId?: string
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/refunds/${jobHash}/reject`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId }),
     });
 
     const body = await response.json();
@@ -602,23 +616,29 @@ export async function listSessions(
 
     const response = await fetchWithRetry(url);
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      throw new Error(`Failed to list sessions (${response.status})`);
+    }
     const result = await response.json();
     setCache(url, result);
     return result;
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error('Network error listing sessions');
   }
 }
 
 // Close a session
 export async function closeSession(
-  sessionId: string
+  sessionId: string,
+  caller?: string
 ): Promise<{ success: boolean; refund_amount?: number; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/close`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: caller, agent: caller }),
     });
 
     const body = await response.json();
@@ -635,12 +655,15 @@ export async function closeSession(
 
 // Pause a session
 export async function pauseSession(
-  sessionId: string
+  sessionId: string,
+  caller?: string
 ): Promise<{ success: boolean; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/pause`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: caller, agent: caller }),
     });
 
     const body = await response.json();
@@ -657,12 +680,15 @@ export async function pauseSession(
 
 // Resume a paused session
 export async function resumeSession(
-  sessionId: string
+  sessionId: string,
+  caller?: string
 ): Promise<{ success: boolean; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: caller, agent: caller }),
     });
 
     const body = await response.json();
@@ -830,14 +856,15 @@ export async function sessionRequest(
 // Settle accumulated session payments
 export async function settleSession(
   sessionId: string,
-  settlementAmount: number
+  settlementAmount: number,
+  agent?: string
 ): Promise<{ success: boolean; session?: SessionInfo; settlement?: { amount: number; settled_at: string }; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/settle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settlement_amount: settlementAmount }),
+      body: JSON.stringify({ settlement_amount: settlementAmount, agent }),
     });
 
     const body = await response.json();
@@ -855,14 +882,15 @@ export async function settleSession(
 // Resolve a dispute (admin only)
 export async function resolveDispute(
   jobHash: string,
-  agentPercentage: number
+  agentPercentage: number,
+  adminAddress?: string
 ): Promise<{ success: boolean; dispute?: DisputeInfo; settlement?: { agent_amount: number; client_amount: number }; error?: string }> {
 
   try {
     const response = await fetch(`${API_BASE}/disputes/${jobHash}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_percentage: agentPercentage }),
+      body: JSON.stringify({ agent_percentage: agentPercentage, admin_address: adminAddress }),
     });
 
     const body = await response.json();
@@ -1055,12 +1083,15 @@ export async function fetchJobs(
     if (cached) return cached;
 
     const response = await fetchWithRetry(url);
-    if (!response.ok) return [];
+    if (!response.ok) {
+      throw new Error(`Failed to fetch jobs (${response.status})`);
+    }
     const result = await response.json();
     setCache(url, result);
     return result;
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error('Network error fetching jobs');
   }
 }
 
