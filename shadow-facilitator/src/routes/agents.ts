@@ -85,7 +85,7 @@ const nullifierStore = new TTLStore<boolean>({
 
 // Validate Aleo address format: must start with "aleo1" and contain valid characters
 function isValidAleoAddress(address: string): boolean {
-  return typeof address === 'string' && /^aleo1[a-z0-9_]{5,}$/.test(address);
+  return typeof address === 'string' && /^aleo1[a-z0-9]{5,}$/.test(address);
 }
 
 // POST /agents/register - Notify facilitator of on-chain agent registration
@@ -104,8 +104,8 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
     }
 
     const parsedType = Number(service_type);
-    if (service_type !== undefined && (!Number.isFinite(parsedType) || parsedType < 0 || parsedType > 10)) {
-      res.status(400).json({ error: 'Invalid service_type: must be 0-10' });
+    if (service_type !== undefined && (!Number.isFinite(parsedType) || parsedType < 0 || parsedType > 7)) {
+      res.status(400).json({ error: 'Invalid service_type: must be 0-7' });
       return;
     }
 

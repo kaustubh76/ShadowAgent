@@ -229,6 +229,7 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
       }
     }
   }
+
 });
 
 // Register shutdown cleanup in dependency order (LIFO — last registered runs first)
