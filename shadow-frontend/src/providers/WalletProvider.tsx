@@ -10,6 +10,7 @@ interface ShieldWalletContextType {
   connected: boolean;
   connecting: boolean;
   viewKey: string | null;
+  privateKey: string | null;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   signTransaction: (programId: string, functionName: string, inputs: string[], fee: number) => Promise<string>;
@@ -21,6 +22,7 @@ const ShieldWalletContext = createContext<ShieldWalletContextType>({
   connected: false,
   connecting: false,
   viewKey: null,
+  privateKey: null,
   connect: async () => {},
   disconnect: async () => {},
   signTransaction: async () => '',
@@ -71,8 +73,7 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     storeDisconnect();
   }, [storeDisconnect]);
 
-  // Sign and submit a transaction using manual authorization building
-  // This bypasses the SDK's broken base fee floor in programManager.execute()
+  // Sign and submit a transaction using ProgramManager.execute()
   const signTransaction = useCallback(async (
     programId: string,
     functionName: string,
@@ -102,39 +103,16 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     const programManager = new ProgramManager(rpcUrl, keyProvider, recordProvider);
     programManager.setAccount(account);
 
-    // Step 1: Build authorization
-    const authorization = await programManager.buildAuthorization({
+    const txId = await programManager.execute({
       programName: programId,
       functionName,
-      privateKey: privKey,
       inputs,
-    });
-
-    // Step 2: Get execution ID and estimate fee
-    const executionId = authorization.toExecutionId().toString();
-    const baseFeeMicrocredits = await programManager.estimateFeeForAuthorization({
-      authorization,
-      programName: programId,
-    });
-    const baseFeeCredits = Number(baseFeeMicrocredits) / 1_000_000;
-
-    // Step 3: Build fee authorization with real estimated fee
-    const feeAuthorization = await programManager.buildFeeAuthorization({
-      deploymentOrExecutionId: executionId,
-      baseFeeCredits,
-      priorityFeeCredits: fee / 1_000_000,
+      priorityFee: fee / 1_000_000,
+      privateFee: false,
       privateKey: privKey,
     });
 
-    // Step 4: Build and submit transaction
-    const tx = await programManager.buildTransactionFromAuthorization({
-      programName: programId,
-      authorization,
-      feeAuthorization,
-    });
-
-    const txId = await networkClient.submitTransaction(tx.toString());
-    return typeof txId === 'string' ? txId : tx.id();
+    return txId;
   }, [privateKey]);
 
   // Fetch records for a program via RPC
@@ -166,11 +144,12 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     connected,
     connecting,
     viewKey,
+    privateKey: privateKey || null,
     connect,
     disconnect,
     signTransaction,
     getRecords,
-  }), [publicKey, connected, connecting, viewKey, connect, disconnect, signTransaction, getRecords]);
+  }), [publicKey, connected, connecting, viewKey, privateKey, connect, disconnect, signTransaction, getRecords]);
 
   return (
     <ShieldWalletContext.Provider value={contextValue}>
