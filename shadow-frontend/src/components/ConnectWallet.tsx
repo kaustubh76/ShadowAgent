@@ -124,7 +124,18 @@ export default function ConnectWallet() {
         <div className={`text-sm font-semibold text-white ${!isLoadingBalance ? 'animate-fade-in' : ''}`}>
           {isLoadingBalance ? '...' : formatBalance(balance)} <span className="text-gray-400 font-normal text-xs">ALEO</span>
         </div>
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider">Testnet</div>
+        {!isLoadingBalance && balance < 1_000_000 ? (
+          <a
+            href="https://faucet.aleo.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-shadow-400 hover:text-shadow-300 transition-colors uppercase tracking-wider"
+          >
+            Get Testnet Credits
+          </a>
+        ) : (
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider">Testnet</div>
+        )}
       </div>
 
       {/* Divider */}

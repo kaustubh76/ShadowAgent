@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Filter, RefreshCw, SearchX, X, Users, ChevronLeft, ChevronRight, ArrowUpDown, Briefcase, DollarSign, Clock, Loader2 } from 'lucide-react';
+import { Search, Filter, RefreshCw, SearchX, X, Users, ChevronLeft, ChevronRight, ArrowUpDown, Briefcase, DollarSign, Clock, Loader2, AlertCircle } from 'lucide-react';
 import {
   useAgentStore,
   ServiceType,
@@ -84,6 +84,7 @@ export default function ClientDashboard() {
   // My Jobs state
   const [myJobs, setMyJobs] = useState<JobInfo[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
   const [jobStatusFilter, setJobStatusFilter] = useState('all');
 
   const sortedResults = useMemo(() => {
@@ -122,37 +123,6 @@ export default function ClientDashboard() {
       setSearchResults(result.agents);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to search agents');
-      // Use demo data on error
-      setSearchResults([
-        {
-          agent_id: '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          service_type: ServiceType.NLP,
-          endpoint_hash: 'hash1',
-          tier: Tier.Gold,
-          is_active: true,
-        },
-        {
-          agent_id: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678',
-          service_type: ServiceType.Vision,
-          endpoint_hash: 'hash2',
-          tier: Tier.Silver,
-          is_active: true,
-        },
-        {
-          agent_id: '567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12',
-          service_type: ServiceType.Code,
-          endpoint_hash: 'hash3',
-          tier: Tier.Diamond,
-          is_active: true,
-        },
-        {
-          agent_id: 'def1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
-          service_type: ServiceType.Data,
-          endpoint_hash: 'hash4',
-          tier: Tier.Bronze,
-          is_active: true,
-        },
-      ]);
     } finally {
       setSearching(false);
     }
@@ -166,8 +136,12 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (activeTab === 'jobs' && connected && address) {
       setJobsLoading(true);
+      setJobsError(null);
       fetchJobs({ client: address }).then((jobs) => {
         setMyJobs(jobs);
+        setJobsLoading(false);
+      }).catch((err) => {
+        setJobsError(err instanceof Error ? err.message : 'Failed to load jobs');
         setJobsLoading(false);
       });
     }
@@ -388,8 +362,18 @@ export default function ClientDashboard() {
               <div className="text-center py-20 card animate-fade-in">
                 <SearchX className="w-14 h-14 text-gray-700 mx-auto mb-5" />
                 <h3 className="text-xl font-semibold text-white mb-2">No Agents Found</h3>
-                <p className="text-gray-400 mb-8 max-w-md mx-auto text-sm leading-relaxed">
-                  No agents match your current search criteria. Try adjusting your filters or clearing them to see all available agents.
+                <p className="text-gray-400 mb-4 max-w-md mx-auto text-sm leading-relaxed">
+                  No agents are registered yet. Register as an agent from the{' '}
+                  <Link to="/agent" className="text-shadow-400 hover:text-shadow-300 transition-colors underline">
+                    Agent Dashboard
+                  </Link>{' '}
+                  to get started.
+                </p>
+                <p className="text-gray-500 mb-8 max-w-md mx-auto text-xs">
+                  Agent registration requires testnet credits.{' '}
+                  <a href="https://faucet.aleo.org/" target="_blank" rel="noopener noreferrer" className="text-shadow-400 hover:text-shadow-300 underline">
+                    Get free credits from the Aleo Faucet
+                  </a>
                 </p>
                 <div className="flex items-center justify-center gap-3">
                   <button
@@ -461,6 +445,11 @@ export default function ClientDashboard() {
           ) : jobsLoading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-6 h-6 text-gray-500 animate-spin" />
+            </div>
+          ) : jobsError ? (
+            <div className="flex items-center gap-3 p-4 bg-red-500/5 border border-red-500/20 rounded-xl text-sm text-red-400">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{jobsError}</span>
             </div>
           ) : (
             <>

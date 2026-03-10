@@ -1,5 +1,5 @@
 import { Shield, Award, DollarSign, BarChart3, TrendingDown } from 'lucide-react';
-import { Tier, getTierName } from '../../stores/agentStore';
+import { Tier, getTierName, useAgentStore } from '../../stores/agentStore';
 import { ANIMATION_DELAY_BASE } from '../../constants/ui';
 
 interface AgentReputation {
@@ -14,6 +14,7 @@ interface ReputationPanelProps {
 }
 
 export default function ReputationPanel({ reputation }: ReputationPanelProps) {
+  const { effectiveRating, decayPeriods, effectiveTier } = useAgentStore();
   const avgRating =
     reputation.totalJobs > 0
       ? reputation.totalRatingPoints / reputation.totalJobs / 10
@@ -60,8 +61,17 @@ export default function ReputationPanel({ reputation }: ReputationPanelProps) {
             <p className="text-sm text-amber-300 font-medium">Reputation Decay Active</p>
             <p className="text-xs text-gray-400 mt-1 leading-relaxed">
               Inactive agents lose 5% of their effective rating every ~7 days. Complete jobs regularly to maintain your tier.
-              Your nominal tier is <span className="text-white font-medium">{getTierName(reputation.tier)}</span> —
-              use the companion program's decay-aware proof to verify your current effective rating on-chain.
+              Your nominal tier is <span className="text-white font-medium">{getTierName(reputation.tier)}</span>
+              {effectiveRating !== null && decayPeriods > 0 && (
+                <> — after <span className="text-amber-300 font-medium">{decayPeriods} decay period{decayPeriods > 1 ? 's' : ''}</span>,
+                your effective rating is <span className="text-white font-medium">{effectiveRating.toFixed(1)} ★</span>
+                {effectiveTier !== null && effectiveTier !== reputation.tier && (
+                  <> (effective tier: <span className="text-amber-300 font-medium">{getTierName(effectiveTier)}</span>)</>
+                )}</>
+              )}
+              {(effectiveRating === null || decayPeriods === 0) && (
+                <> — use the companion program's decay-aware proof to verify your current effective rating on-chain.</>
+              )}
             </p>
           </div>
         </div>

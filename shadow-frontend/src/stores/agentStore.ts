@@ -471,8 +471,8 @@ export const useAgentStore = create<AgentState>()(
           jobs: allJobs,
         };
       });
-    } catch {
-      // Silently fail - facilitator may not be running
+    } catch (err) {
+      console.warn('Failed to hydrate from facilitator:', err instanceof Error ? err.message : err);
     }
   },
     }),

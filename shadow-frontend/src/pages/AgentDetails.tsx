@@ -155,6 +155,7 @@ function RequestServiceModal({
   const { createEscrow, isLoading, status: escrowStatus } = useEscrowTransaction();
   const { formattedBalance, checkBalance } = useBalanceCheck();
   const [localStatus, setLocalStatus] = useState<string | null>(null);
+  const toast = useToast();
 
   // Check balance on mount
   useEffect(() => {
@@ -184,6 +185,7 @@ function RequestServiceModal({
       useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: agent.agent_id, amount: microcredits });
     } else {
       setLocalStatus(`Error: ${result.error}`);
+      toast.error(result.error || 'Failed to create escrow');
     }
   };
 

@@ -38,7 +38,7 @@ export default function AgentDashboard() {
   const { checkBalance } = useBalanceCheck();
 
   // Agent store
-  const { setSessions, setJobs, addTransaction } = useAgentStore();
+  const { setSessions, setJobs, addTransaction, setDecayInfo } = useAgentStore();
 
   // State
   const [isRegistered, setIsRegistered] = useState(false);
@@ -78,11 +78,35 @@ export default function AgentDashboard() {
                 totalRevenue: data.total_revenue || 0,
                 tier: data.tier || Tier.New,
               });
+
+              // Calculate and set decay info
+              try {
+                const healthRes = await fetch(`${API_BASE}/health/ready`);
+                if (healthRes.ok) {
+                  const healthData = await healthRes.json();
+                  const blockHeight = healthData.blockHeight || 0;
+                  const registeredAt = data.registered_at || Date.now();
+                  const registeredBlock = blockHeight - Math.floor((Date.now() - registeredAt) / 6000);
+                  const DECAY_PERIOD = 100_800; // ~7 days at 6s/block
+                  const elapsed = blockHeight - registeredBlock;
+                  const periods = Math.min(Math.floor(elapsed / DECAY_PERIOD), 10);
+                  const rawRating = data.total_rating_points || 0;
+                  let effectivePoints = rawRating;
+                  for (let i = 0; i < periods; i++) {
+                    effectivePoints = Math.floor((effectivePoints * 95) / 100);
+                  }
+                  const effectiveAvg = data.total_jobs > 0 ? effectivePoints / data.total_jobs / 10 : 0;
+                  setDecayInfo(effectiveAvg, periods, data.tier || Tier.New);
+                }
+              } catch {
+                // Decay info is optional
+              }
             } else {
               setAgentId(publicKey.slice(0, 16) + '...');
               setReputation({ totalJobs: 0, totalRatingPoints: 0, totalRevenue: 0, tier: Tier.New });
             }
-          } catch {
+          } catch (err) {
+            console.warn('Failed to fetch agent data from facilitator:', err instanceof Error ? err.message : err);
             setAgentId(publicKey.slice(0, 16) + '...');
             setReputation({ totalJobs: 0, totalRatingPoints: 0, totalRevenue: 0, tier: Tier.New });
           }
@@ -107,11 +131,11 @@ export default function AgentDashboard() {
   // Load sessions and jobs where user is the agent + periodic refresh
   useEffect(() => {
     if (connected && publicKey && isRegistered) {
-      listSessions({ agent: publicKey }).then(setSessions);
-      fetchJobs({ agent: publicKey }).then(setJobs);
+      listSessions({ agent: publicKey }).then(setSessions).catch(err => console.warn('Failed to load sessions:', err.message));
+      fetchJobs({ agent: publicKey }).then(setJobs).catch(err => console.warn('Failed to load jobs:', err.message));
       const interval = setInterval(() => {
-        listSessions({ agent: publicKey }).then(setSessions);
-        fetchJobs({ agent: publicKey }).then(setJobs);
+        listSessions({ agent: publicKey }).then(setSessions).catch(() => {});
+        fetchJobs({ agent: publicKey }).then(setJobs).catch(() => {});
       }, 60_000);
       return () => clearInterval(interval);
     }
@@ -260,13 +284,28 @@ export default function AgentDashboard() {
   // Registration form
   if (!isRegistered) {
     return (
-      <RegistrationForm
-        onRegistered={() => {
-          setIsRegistered(true);
-          setReputation({ totalJobs: 0, totalRatingPoints: 0, totalRevenue: 0, tier: Tier.New });
-          checkRegistration();
-        }}
-      />
+      <div className="space-y-6">
+        <RegistrationForm
+          onRegistered={() => {
+            setIsRegistered(true);
+            setReputation({ totalJobs: 0, totalRatingPoints: 0, totalRevenue: 0, tier: Tier.New });
+            checkRegistration();
+          }}
+        />
+        <div className="max-w-2xl mx-auto text-center">
+          <p className="text-gray-500 text-xs">
+            Need testnet credits?{' '}
+            <a
+              href="https://faucet.aleo.org/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-shadow-400 hover:text-shadow-300 transition-colors underline"
+            >
+              Get free credits from the Aleo Faucet
+            </a>
+          </p>
+        </div>
+      </div>
     );
   }
 
