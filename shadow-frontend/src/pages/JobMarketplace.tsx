@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Briefcase, Search, Filter, RefreshCw, X, DollarSign, Clock, Users, ChevronDown, ChevronUp, ArrowUpDown, Lock, ExternalLink, Zap } from 'lucide-react';
+import { Briefcase, Search, Filter, RefreshCw, X, DollarSign, Clock, Users, ChevronDown, ChevronUp, ArrowUpDown, Lock, ExternalLink, Zap, AlertCircle } from 'lucide-react';
 import { useAgentStore, type JobInfo, ServiceType, getServiceTypeName } from '../stores/agentStore';
 import { fetchJobs } from '../lib/api';
 import { useWalletStore } from '../stores/walletStore';
@@ -58,6 +58,7 @@ export default function JobMarketplace() {
   const { jobs, setJobs } = useAgentStore();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Filters
@@ -68,6 +69,7 @@ export default function JobMarketplace() {
 
   const loadJobs = async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
       const params: Record<string, string | number> = {};
       if (statusFilter) params.status = statusFilter;
@@ -75,7 +77,7 @@ export default function JobMarketplace() {
       const result = await fetchJobs(params as Parameters<typeof fetchJobs>[0]);
       setJobs(result);
     } catch {
-      // Silently fail
+      setFetchError('Failed to load jobs. The facilitator may be offline.');
     } finally {
       setIsLoading(false);
     }
@@ -236,6 +238,15 @@ export default function JobMarketplace() {
           </div>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {fetchError && (
+        <div className="flex items-center gap-3 bg-red-500/5 border border-red-500/20 text-red-300 p-4 rounded-xl animate-fade-in-down">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span className="text-sm">{fetchError}</span>
+          <button onClick={loadJobs} className="ml-auto text-xs text-red-400 hover:text-red-300 underline">Retry</button>
+        </div>
+      )}
 
       {/* Results */}
       <div>

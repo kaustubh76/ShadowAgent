@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Briefcase, DollarSign, Lock, Loader2, Zap, Users } from 'lucide-react';
+import { Briefcase, DollarSign, Lock, Loader2, Zap, Users, AlertCircle } from 'lucide-react';
 import { fetchJobs } from '../lib/api';
 import type { JobInfo } from '../stores/agentStore';
 import { getServiceTypeName } from '../stores/agentStore';
 import { FACILITATOR_ENABLED } from '../config';
+import { useToast } from '../contexts/ToastContext';
 
 interface AgentJobsListProps {
   agentAddress: string;
@@ -13,6 +14,8 @@ interface AgentJobsListProps {
 export default function AgentJobsList({ agentAddress, onAcceptJob }: AgentJobsListProps) {
   const [jobs, setJobs] = useState<JobInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (!FACILITATOR_ENABLED) {
@@ -21,6 +24,7 @@ export default function AgentJobsList({ agentAddress, onAcceptJob }: AgentJobsLi
     }
     let cancelled = false;
     setLoading(true);
+    setFetchError(null);
     fetchJobs({ agent: agentAddress, status: 'open' })
       .then((result) => {
         if (!cancelled) {
@@ -28,13 +32,16 @@ export default function AgentJobsList({ agentAddress, onAcceptJob }: AgentJobsLi
           setLoading(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Failed to load jobs';
+          setFetchError(message);
+          toast.error(message);
           setLoading(false);
         }
       });
     return () => { cancelled = true; };
-  }, [agentAddress]);
+  }, [agentAddress, toast]);
 
   if (!FACILITATOR_ENABLED) return null;
 
@@ -52,6 +59,20 @@ export default function AgentJobsList({ agentAddress, onAcceptJob }: AgentJobsLi
         </div>
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div
+        className="card opacity-0 animate-fade-in-up mb-6"
+        style={{ animationDelay: '0.25s', animationFillMode: 'forwards' }}
+      >
+        <div className="flex items-center gap-3 p-4 bg-red-500/5 border border-red-500/20 rounded-xl text-sm text-red-400">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{fetchError}</span>
         </div>
       </div>
     );
