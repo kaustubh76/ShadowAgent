@@ -22,6 +22,7 @@ import { getTierName, useAgentStore } from '../stores/agentStore';
 import { listSessions, fetchJobs } from '../lib/api';
 
 import { API_BASE, FACILITATOR_ENABLED } from '../config';
+import FaucetWidget from '../components/FaucetWidget';
 
 interface AgentReputation {
   totalJobs: number;
@@ -292,18 +293,8 @@ export default function AgentDashboard() {
             checkRegistration();
           }}
         />
-        <div className="max-w-2xl mx-auto text-center">
-          <p className="text-gray-500 text-xs">
-            Need testnet credits?{' '}
-            <a
-              href="https://faucet.aleo.org/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-shadow-400 hover:text-shadow-300 transition-colors underline"
-            >
-              Get free credits from the Aleo Faucet
-            </a>
-          </p>
+        <div className="max-w-md mx-auto mt-4">
+          <FaucetWidget />
         </div>
       </div>
     );

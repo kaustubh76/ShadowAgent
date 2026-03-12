@@ -21,6 +21,7 @@ import {
 import { useShieldWallet } from '../providers/WalletProvider';
 import { useToast } from '../contexts/ToastContext';
 import { API_BASE } from '../config';
+import FaucetWidget from '../components/FaucetWidget';
 import {
   getBalance,
   getBlockHeight,
@@ -562,21 +563,8 @@ export default function TestnetDiagnostics() {
         <TestCard test={transferTest} />
       </div>
 
-      {/* Faucet info */}
-      <div className="p-4 rounded-xl border border-white/[0.04] bg-white/[0.02]">
-        <p className="text-xs text-gray-500">
-          Need testnet credits? Visit{' '}
-          <a
-            href="https://faucet.aleo.org"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-shadow-400 hover:text-shadow-300 underline underline-offset-2"
-          >
-            faucet.aleo.org
-          </a>{' '}
-          to fund your wallet address.
-        </p>
-      </div>
+      {/* Faucet widget */}
+      <FaucetWidget />
     </div>
   );
 }

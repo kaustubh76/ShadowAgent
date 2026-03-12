@@ -12,6 +12,7 @@ import type { JobInfo } from '../stores/agentStore';
 import { searchAgents, fetchJobs } from '../lib/api';
 import { useWalletStore } from '../stores/walletStore';
 import AgentCard from '../components/AgentCard';
+import FaucetWidget from '../components/FaucetWidget';
 import { ANIMATION_DELAY_BASE } from '../constants/ui';
 
 function SkeletonCard({ delay = 0 }: { delay?: number }) {
@@ -369,12 +370,9 @@ export default function ClientDashboard() {
                   </Link>{' '}
                   to get started.
                 </p>
-                <p className="text-gray-500 mb-8 max-w-md mx-auto text-xs">
-                  Agent registration requires testnet credits.{' '}
-                  <a href="https://faucet.aleo.org/" target="_blank" rel="noopener noreferrer" className="text-shadow-400 hover:text-shadow-300 underline">
-                    Get free credits from the Aleo Faucet
-                  </a>
-                </p>
+                <div className="max-w-sm mx-auto mb-8">
+                  <FaucetWidget />
+                </div>
                 <div className="flex items-center justify-center gap-3">
                   <button
                     onClick={handleClearFilters}
