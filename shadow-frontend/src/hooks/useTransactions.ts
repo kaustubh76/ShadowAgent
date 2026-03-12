@@ -4,10 +4,11 @@
 import { useState, useCallback } from 'react';
 import { useShieldWallet } from '../providers/WalletProvider';
 import { useSDKStore } from '../stores/sdkStore';
+import { useWalletStore } from '../stores/walletStore';
+import { RATING_BURN_COST } from '../services/aleo';
 
-// Test transaction amounts: 0.01 credits = 10,000 microcredits
-const TEST_AMOUNT = 10_000;
-const TEST_FEE = 10_000;
+// Transaction fee: 0.01 credits = 10,000 microcredits
+const TX_FEE = 10_000;
 
 // Inline credits formatter to avoid SDK import
 const formatCredits = (microcredits: number): string => {
@@ -31,7 +32,7 @@ export function useEscrowTransaction() {
 
   const createEscrow = useCallback(async (
     agentAddress: string,
-    amount: number = TEST_AMOUNT,
+    amount: number,
     _jobDescription: string = 'service-request'
   ): Promise<TransactionResult> => {
     if (!publicKey) {
@@ -47,10 +48,10 @@ export function useEscrowTransaction() {
       const { getBalance } = await import('@shadowagent/sdk');
       const balance = await getBalance(publicKey);
 
-      if (balance < amount + TEST_FEE) {
+      if (balance < amount + TX_FEE) {
         return {
           success: false,
-          error: `Insufficient balance: have ${formatCredits(balance)}, need ${formatCredits(amount + TEST_FEE)}`,
+          error: `Insufficient balance: have ${formatCredits(balance)}, need ${formatCredits(amount + TX_FEE)}`,
         };
       }
 
@@ -61,7 +62,7 @@ export function useEscrowTransaction() {
         'credits.aleo',
         'transfer_public',
         [agentAddress, `${amount}u64`],
-        TEST_FEE
+        TX_FEE
       );
 
       if (txId) {
@@ -73,9 +74,11 @@ export function useEscrowTransaction() {
 
         if (confirmation.confirmed) {
           setStatus('Escrow confirmed!');
+          useWalletStore.getState().triggerBalanceRefresh();
           return { success: true, txId };
         } else {
           setStatus('Transaction submitted (confirmation pending)');
+          useWalletStore.getState().triggerBalanceRefresh();
           return { success: true, txId, error: confirmation.error };
         }
       }
@@ -107,7 +110,7 @@ export function useRatingTransaction() {
     agentAddress: string,
     rating: number, // 1-5 stars
     jobHash: string,
-    paymentAmount: number = TEST_AMOUNT
+    paymentAmount: number = RATING_BURN_COST
   ): Promise<TransactionResult> => {
     if (!publicKey) {
       return { success: false, error: 'Shield Wallet not connected' };
@@ -127,6 +130,7 @@ export function useRatingTransaction() {
 
       if (result.success) {
         setStatus('Rating submitted!');
+        useWalletStore.getState().triggerBalanceRefresh();
         return { success: true, txId: result.txId };
       } else {
         return { success: false, error: result.error };

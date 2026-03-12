@@ -6,6 +6,8 @@ import { useShieldWallet } from '../providers/WalletProvider';
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { ALEO_EXPLORER_URL } from '../constants/ui';
 import { useToast } from '../contexts/ToastContext';
+import { useWalletStore } from '../stores/walletStore';
+import FaucetWidget from './FaucetWidget';
 
 export default function ConnectWallet() {
   const { publicKey, connected, connecting, connect, disconnect } = useShieldWallet();
@@ -60,6 +62,21 @@ export default function ConnectWallet() {
       setBalance(0);
     }
   }, [connected, publicKey, fetchBalance]);
+
+  // Poll balance every 30 seconds while connected
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+    const interval = setInterval(fetchBalance, 30_000);
+    return () => clearInterval(interval);
+  }, [connected, publicKey, fetchBalance]);
+
+  // Re-fetch balance when a transaction triggers a refresh
+  const lastBalanceRefresh = useWalletStore((s) => s.lastBalanceRefresh);
+  useEffect(() => {
+    if (lastBalanceRefresh > 0 && connected && publicKey) {
+      fetchBalance();
+    }
+  }, [lastBalanceRefresh, connected, publicKey, fetchBalance]);
 
   // Copy address to clipboard
   const handleCopyAddress = () => {
@@ -125,14 +142,7 @@ export default function ConnectWallet() {
           {isLoadingBalance ? '...' : formatBalance(balance)} <span className="text-gray-400 font-normal text-xs">ALEO</span>
         </div>
         {!isLoadingBalance && balance < 1_000_000 ? (
-          <a
-            href="https://faucet.aleo.org/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] text-shadow-400 hover:text-shadow-300 transition-colors uppercase tracking-wider"
-          >
-            Get Testnet Credits
-          </a>
+          <FaucetWidget variant="compact" />
         ) : (
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Testnet</div>
         )}

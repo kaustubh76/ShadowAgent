@@ -7,12 +7,14 @@ interface WalletState {
   address: string | null;
   balance: number;
   network: 'testnet' | 'mainnet';
+  lastBalanceRefresh: number;
 
   // Actions
   connect: (address: string) => void;
   disconnect: () => void;
   setBalance: (balance: number) => void;
   setNetwork: (network: 'testnet' | 'mainnet') => void;
+  triggerBalanceRefresh: () => void;
 }
 
 export const useWalletStore = create<WalletState>((set) => ({
@@ -20,6 +22,7 @@ export const useWalletStore = create<WalletState>((set) => ({
   address: null,
   balance: 0,
   network: 'testnet',
+  lastBalanceRefresh: 0,
 
   connect: (address: string) =>
     set({
@@ -37,6 +40,8 @@ export const useWalletStore = create<WalletState>((set) => ({
   setBalance: (balance: number) => set({ balance }),
 
   setNetwork: (network: 'testnet' | 'mainnet') => set({ network }),
+
+  triggerBalanceRefresh: () => set({ lastBalanceRefresh: Date.now() }),
 }));
 
 // Helper to format address for display
