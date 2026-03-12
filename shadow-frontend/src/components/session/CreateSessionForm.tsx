@@ -3,6 +3,7 @@ import { Zap } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
 import { createSession } from '../../lib/api';
 import { useWalletStore } from '../../stores/walletStore';
+import { useToast } from '../../contexts/ToastContext';
 
 interface CreateSessionFormProps {
   agentAddress: string;
@@ -16,6 +17,7 @@ const hoursToBlocks = (hours: number) => Math.floor((hours * 3600) / 6);
 export default function CreateSessionForm({ agentAddress, onClose, onCreated }: CreateSessionFormProps) {
   const { address } = useWalletStore();
   const { addSession, addTransaction } = useAgentStore();
+  const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,10 +40,16 @@ export default function CreateSessionForm({ agentAddress, onClose, onCreated }: 
       return;
     }
 
+    if (!address) {
+      toast.error('Wallet not connected');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const result = await createSession({
         agent: agentAddress,
-        client: address || 'unknown',
+        client: address,
         max_total: totalMicrocredits,
         max_per_request: perRequestMicrocredits,
         rate_limit: parseInt(rateLimit),

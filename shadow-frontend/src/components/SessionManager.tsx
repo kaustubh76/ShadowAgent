@@ -31,7 +31,7 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
   }, [isOpen, address, agentAddress, setSessions, setPolicies]);
 
   const agentSessions = sessions.filter(
-    s => s.agent === agentAddress && (s.client === address || s.client === 'unknown')
+    s => s.agent === agentAddress && s.client === address
   );
   const activeSessions = agentSessions.filter(s => s.status === 'active' || s.status === 'paused');
   const closedCount = agentSessions.filter(s => s.status === 'closed').length;

@@ -3,6 +3,7 @@ import { Zap, Shield } from 'lucide-react';
 import { useAgentStore, type PolicyInfo } from '../../stores/agentStore';
 import { createPolicy, createSessionFromPolicy } from '../../lib/api';
 import { useWalletStore } from '../../stores/walletStore';
+import { useToast } from '../../contexts/ToastContext';
 
 interface PolicyManagerProps {
   agentAddress: string;
@@ -15,6 +16,7 @@ const hoursToBlocks = (hours: number) => Math.floor((hours * 3600) / 6);
 export default function PolicyManager({ agentAddress, onSessionCreated }: PolicyManagerProps) {
   const { address } = useWalletStore();
   const { policies, addPolicy, addSession, addTransaction } = useAgentStore();
+  const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,9 +45,15 @@ export default function PolicyManager({ agentAddress, onSessionCreated }: Policy
       return;
     }
 
+    if (!address) {
+      toast.error('Wallet not connected');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const result = await createPolicy({
-        owner: address || 'unknown',
+        owner: address,
         max_session_value: maxSessionMicrocredits,
         max_single_request: maxRequestMicrocredits,
         require_proofs: policyRequireProofs,
@@ -74,10 +82,16 @@ export default function PolicyManager({ agentAddress, onSessionCreated }: Policy
     const perRequestMicrocredits = Math.round(parseFloat(maxPerRequest) * 1_000_000);
     const blocks = hoursToBlocks(parseFloat(durationHours));
 
+    if (!address) {
+      toast.error('Wallet not connected');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const result = await createSessionFromPolicy(policy.policy_id, {
         agent: agentAddress,
-        client: address || 'unknown',
+        client: address,
         max_total: totalMicrocredits,
         max_per_request: perRequestMicrocredits,
         rate_limit: parseInt(rateLimit),
