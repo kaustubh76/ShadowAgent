@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users, Star } from 'lucide-react';
 import { AgentListing, getServiceTypeName, getTierName } from '../stores/agentStore';
-import { getAgent, verifyReputationProof, submitDispute, submitRefund, createMultiSigEscrow, approveMultiSigEscrow, submitRating } from '../lib/api';
+import { getAgent, verifyReputationProof, submitDispute, submitRefund, createMultiSigEscrow, approveMultiSigEscrow, submitRating, fetchJobs } from '../lib/api';
 import { useAgentStore } from '../stores/agentStore';
 import TierBadge from '../components/TierBadge';
 import { useWalletStore } from '../stores/walletStore';
@@ -17,6 +17,8 @@ import SessionManager from '../components/SessionManager';
 import AgentJobsList from '../components/AgentJobsList';
 import type { JobInfo } from '../stores/agentStore';
 import { useToast } from '../contexts/ToastContext';
+import { FACILITATOR_ENABLED } from '../config';
+import { generateSecretHash } from '../utils/crypto';
 
 const privacyChecks = [
   { text: 'Job count verified (not revealed)', icon: Eye },
@@ -24,6 +26,55 @@ const privacyChecks = [
   { text: 'Average rating verified (not revealed)', icon: ShieldCheck },
   { text: 'Identity verified via staking bond (Sybil resistant)', icon: Fingerprint },
 ];
+
+// Job Selector Modal — shown when user has multiple jobs and needs to pick one
+function JobSelectorModal({
+  title,
+  jobs,
+  onSelect,
+  onClose,
+}: {
+  title: string;
+  jobs: JobInfo[];
+  onSelect: (job: JobInfo) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in" onClick={onClose}>
+      <div
+        className="relative max-w-md w-full bg-surface-1 border border-white/[0.06] rounded-2xl p-6 shadow-2xl animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/[0.04]">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {jobs.map((job) => (
+            <button
+              key={job.job_id}
+              onClick={() => onSelect(job)}
+              className="w-full text-left bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.04] rounded-xl p-3 transition-colors"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-white truncate">{job.title}</span>
+                <span className="text-xs font-semibold text-shadow-400">
+                  {(job.escrow_amount / 1_000_000).toFixed(2)} credits
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="font-mono truncate max-w-[160px]">{job.job_hash}</span>
+                <span className="px-1.5 py-0.5 rounded bg-white/[0.04]">{job.status}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Reputation Proof Modal
 function ReputationProofModal({
@@ -239,6 +290,7 @@ function RequestServiceModal({
                 onChange={(e) => setAmount(e.target.value)}
                 min="0.01"
                 step="0.01"
+                placeholder="Enter amount"
                 className="input"
                 disabled={isLoading}
               />
@@ -305,7 +357,7 @@ export default function AgentDetails() {
   const [showMultiSigForm, setShowMultiSigForm] = useState(false);
   const [showRatingForm, setShowRatingForm] = useState(false);
   const [showSessionManager, setShowSessionManager] = useState(false);
-  const [initialAmount, setInitialAmount] = useState('0.01');
+  const [initialAmount, setInitialAmount] = useState('');
   const [multiSigData, setMultiSigData] = useState<{
     jobHash: string;
     signers: [string, string, string];
@@ -314,7 +366,13 @@ export default function AgentDetails() {
     sigCount: number;
     status: 'locked' | 'released' | 'refunded';
   } | null>(null);
+  const [escrowSecret, setEscrowSecret] = useState<string | null>(null);
   const toast = useToast();
+
+  // User's real jobs with this agent (for dispute/refund/rating)
+  const [userJobs, setUserJobs] = useState<JobInfo[]>([]);
+  const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
+  const { address } = useWalletStore();
 
   useEffect(() => {
     async function fetchAgent() {
@@ -333,6 +391,23 @@ export default function AgentDetails() {
 
     fetchAgent();
   }, [agentId]);
+
+  // Fetch user's jobs with this agent for dispute/refund/rating flows
+  useEffect(() => {
+    if (!FACILITATOR_ENABLED || !address || !agentId) return;
+    fetchJobs({ client: address, agent: agentId })
+      .then((jobs) => {
+        setUserJobs(jobs);
+        if (jobs.length === 1) setSelectedJob(jobs[0]);
+      })
+      .catch(() => setUserJobs([]));
+  }, [address, agentId]);
+
+  // Derived: jobs eligible for dispute/refund vs rating
+  const disputeableJobs = userJobs.filter(
+    (j) => j.escrow_status === 'locked' || j.status === 'in_progress'
+  );
+  const ratableJobs = userJobs.filter((j) => j.status === 'completed');
 
   const handleCopyId = () => {
     if (agentId) {
@@ -382,7 +457,7 @@ export default function AgentDetails() {
       {error && (
         <div className="flex items-center gap-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mb-6 text-sm animate-fade-in-down">
           <div className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" />
-          <span className="text-yellow-400">{error} — showing demo data below.</span>
+          <span className="text-yellow-400">{error}</span>
         </div>
       )}
 
@@ -577,15 +652,19 @@ export default function AgentDetails() {
 
             <div className="flex gap-3 pt-1 border-t border-white/[0.04] mt-2">
               <button
-                onClick={() => setShowDisputeForm(true)}
-                className="btn flex-1 flex items-center justify-center gap-2 bg-red-500/5 border border-red-500/20 text-red-300 hover:bg-red-500/10 hover:border-red-500/30 text-sm"
+                onClick={() => { if (disputeableJobs.length === 1) setSelectedJob(disputeableJobs[0]); setShowDisputeForm(true); }}
+                disabled={disputeableJobs.length === 0}
+                title={disputeableJobs.length === 0 ? 'No active jobs with this agent' : undefined}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-red-500/5 border border-red-500/20 text-red-300 hover:bg-red-500/10 hover:border-red-500/30 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/5"
               >
                 <AlertTriangle className="w-4 h-4" />
                 Open Dispute
               </button>
               <button
-                onClick={() => setShowRefundModal(true)}
-                className="btn flex-1 flex items-center justify-center gap-2 bg-amber-500/5 border border-amber-500/20 text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 text-sm"
+                onClick={() => { if (disputeableJobs.length === 1) setSelectedJob(disputeableJobs[0]); setShowRefundModal(true); }}
+                disabled={disputeableJobs.length === 0}
+                title={disputeableJobs.length === 0 ? 'No active jobs with this agent' : undefined}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-amber-500/5 border border-amber-500/20 text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500/5"
               >
                 <SplitSquareHorizontal className="w-4 h-4" />
                 Propose Partial Refund
@@ -598,13 +677,20 @@ export default function AgentDetails() {
                 Multi-Sig Escrow
               </button>
               <button
-                onClick={() => setShowRatingForm(true)}
-                className="btn flex-1 flex items-center justify-center gap-2 bg-yellow-500/5 border border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/10 hover:border-yellow-500/30 text-sm"
+                onClick={() => { if (ratableJobs.length === 1) setSelectedJob(ratableJobs[0]); setShowRatingForm(true); }}
+                disabled={ratableJobs.length === 0}
+                title={ratableJobs.length === 0 ? 'No completed jobs to rate' : undefined}
+                className="btn flex-1 flex items-center justify-center gap-2 bg-yellow-500/5 border border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/10 hover:border-yellow-500/30 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-yellow-500/5"
               >
                 <Star className="w-4 h-4" />
                 Submit Rating
               </button>
             </div>
+            {disputeableJobs.length === 0 && ratableJobs.length === 0 && userJobs.length === 0 && (
+              <p className="text-xs text-gray-600 text-center">
+                No jobs with this agent yet. Create an escrow or accept a job to enable dispute, refund, and rating actions.
+              </p>
+            )}
 
             {multiSigData && (
               <div className="mt-2">
@@ -649,77 +735,99 @@ export default function AgentDetails() {
       {showRequestModal && (
         <RequestServiceModal agent={agent} onClose={() => setShowRequestModal(false)} initialAmount={initialAmount} />
       )}
-      {showDisputeForm && (
+      {showDisputeForm && selectedJob && (
         <DisputeForm
           isOpen={showDisputeForm}
-          onClose={() => setShowDisputeForm(false)}
+          onClose={() => { setShowDisputeForm(false); setSelectedJob(null); }}
           onSubmit={async (evidenceHash) => {
-            const { address } = useWalletStore.getState();
+            const walletAddr = useWalletStore.getState().address;
+            if (!walletAddr) { toast.error('Wallet not connected'); return; }
             const result = await submitDispute({
               agent: agent.agent_id,
-              client: address || 'unknown',
-              job_hash: `job_${agent.agent_id.slice(0, 8)}`,
-              escrow_amount: 10_000_000,
+              client: walletAddr,
+              job_hash: selectedJob.job_hash,
+              escrow_amount: selectedJob.escrow_amount,
               evidence_hash: evidenceHash,
             });
             if (result.success && result.dispute) {
               toast.success('Dispute submitted successfully');
               useAgentStore.getState().addDispute(result.dispute);
-              useAgentStore.getState().addTransaction({ type: 'dispute_opened', agentId: agent.agent_id, amount: 10_000_000 });
+              useAgentStore.getState().addTransaction({ type: 'dispute_opened', agentId: agent.agent_id, amount: selectedJob.escrow_amount });
             } else {
               toast.error(result.error || 'Failed to submit dispute');
             }
           }}
           agentAddress={agent.agent_id}
-          jobHash={`job_${agent.agent_id.slice(0, 8)}`}
-          escrowAmount={10_000_000}
+          jobHash={selectedJob.job_hash}
+          escrowAmount={selectedJob.escrow_amount}
         />
       )}
-      {showRefundModal && (
+      {showDisputeForm && !selectedJob && disputeableJobs.length > 1 && (
+        <JobSelectorModal
+          title="Select Job to Dispute"
+          jobs={disputeableJobs}
+          onSelect={(job) => { setSelectedJob(job); }}
+          onClose={() => setShowDisputeForm(false)}
+        />
+      )}
+      {showRefundModal && selectedJob && (
         <PartialRefundModal
           isOpen={showRefundModal}
-          onClose={() => setShowRefundModal(false)}
+          onClose={() => { setShowRefundModal(false); setSelectedJob(null); }}
           onSubmit={async (agentAmount) => {
-            const { address } = useWalletStore.getState();
+            const walletAddr = useWalletStore.getState().address;
+            if (!walletAddr) { toast.error('Wallet not connected'); return; }
             const result = await submitRefund({
               agent: agent.agent_id,
-              client: address || 'unknown',
-              total_amount: 10_000_000,
+              client: walletAddr,
+              total_amount: selectedJob.escrow_amount,
               agent_amount: agentAmount,
-              job_hash: `job_${agent.agent_id.slice(0, 8)}`,
+              job_hash: selectedJob.job_hash,
             });
             if (result.success && result.proposal) {
               toast.success('Partial refund proposed successfully');
               useAgentStore.getState().addPartialRefund(result.proposal);
-              useAgentStore.getState().addTransaction({ type: 'partial_refund_proposed', agentId: agent.agent_id, amount: 10_000_000 });
+              useAgentStore.getState().addTransaction({ type: 'partial_refund_proposed', agentId: agent.agent_id, amount: selectedJob.escrow_amount });
             } else {
               toast.error(result.error || 'Failed to propose refund');
             }
           }}
           agentAddress={agent.agent_id}
-          jobHash={`job_${agent.agent_id.slice(0, 8)}`}
-          totalAmount={10_000_000}
+          jobHash={selectedJob.job_hash}
+          totalAmount={selectedJob.escrow_amount}
+        />
+      )}
+      {showRefundModal && !selectedJob && disputeableJobs.length > 1 && (
+        <JobSelectorModal
+          title="Select Job for Refund"
+          jobs={disputeableJobs}
+          onSelect={(job) => { setSelectedJob(job); }}
+          onClose={() => setShowRefundModal(false)}
         />
       )}
       {showMultiSigForm && (
         <MultiSigEscrowForm
           isOpen={showMultiSigForm}
-          onClose={() => setShowMultiSigForm(false)}
+          onClose={() => { setShowMultiSigForm(false); setEscrowSecret(null); }}
           onSubmit={async (signers, requiredSigs) => {
-            const { address } = useWalletStore.getState();
-            const jobHash = `job_msig_${Date.now()}`;
+            const walletAddr = useWalletStore.getState().address;
+            if (!walletAddr) { toast.error('Wallet not connected'); return; }
+            const { secret, hash: secretHash } = await generateSecretHash();
+            const escrowAmount = selectedJob?.escrow_amount ?? Math.round(parseFloat(initialAmount || '1') * 1_000_000);
+            const jobHash = selectedJob?.job_hash ?? `job_msig_${Date.now()}`;
             const result = await createMultiSigEscrow({
               agent: agent.agent_id,
-              owner: address || 'unknown',
-              amount: 10_000_000,
+              owner: walletAddr,
+              amount: escrowAmount,
               job_hash: jobHash,
-              secret_hash: `secret_${jobHash}`,
+              secret_hash: secretHash,
               signers,
               required_signatures: requiredSigs,
             });
             if (result.success && result.escrow) {
               toast.success('Multi-sig escrow created');
-              useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: agent.agent_id, amount: 10_000_000 });
+              setEscrowSecret(secret);
+              useAgentStore.getState().addTransaction({ type: 'escrow_created', agentId: agent.agent_id, amount: escrowAmount });
               setMultiSigData({
                 jobHash: result.escrow.job_hash,
                 signers: result.escrow.signers,
@@ -733,8 +841,37 @@ export default function AgentDetails() {
             }
           }}
           agentAddress={agent.agent_id}
-          amount={10_000_000}
+          amount={selectedJob?.escrow_amount ?? Math.round(parseFloat(initialAmount || '1') * 1_000_000)}
         />
+      )}
+      {escrowSecret && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in" onClick={() => setEscrowSecret(null)}>
+          <div className="relative max-w-md w-full bg-surface-1 border border-white/[0.06] rounded-2xl p-6 shadow-2xl animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
+                <Lock className="w-4 h-4 text-amber-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">Escrow Secret</h3>
+            </div>
+            <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 mb-4">
+              <p className="text-red-400 text-xs">Save this secret now. It will not be shown again. You need it to release the escrow.</p>
+            </div>
+            <div className="bg-surface-0/60 border border-white/[0.04] rounded-xl p-3 mb-4">
+              <code className="text-xs text-gray-300 break-all select-all">{escrowSecret}</code>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { navigator.clipboard.writeText(escrowSecret); toast.success('Secret copied to clipboard'); }}
+                className="btn btn-primary flex-1 text-sm"
+              >
+                Copy Secret
+              </button>
+              <button onClick={() => setEscrowSecret(null)} className="btn btn-outline flex-1 text-sm">
+                I've Saved It
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {showRatingForm && (
         <RatingForm
