@@ -15,7 +15,9 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:agents": "ts-node scripts/seed-agents.ts --facilitator-only",
+    "seed:agents:generate": "ts-node scripts/seed-agents.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

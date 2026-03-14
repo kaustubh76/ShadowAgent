@@ -210,22 +210,26 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
   }
 
   // Seed known agents directly into cache (bypasses on-chain BHP256 hash lookup)
-  // Format: address:service_type (e.g., "aleo1abc...:1,aleo1def...:3")
+  // Format: address:service_type:tier (e.g., "aleo1abc...:1:2,aleo1def...:3:0")
+  // Tier is optional — defaults to 0 (New) for backward compatibility
   const seedAgents = process.env.SEED_AGENTS;
   if (seedAgents) {
     const entries = seedAgents.split(',').map(e => e.trim()).filter(Boolean);
     for (const entry of entries) {
-      const [address, serviceTypeStr] = entry.split(':');
+      const parts = entry.split(':');
+      const address = parts[0];
+      const serviceTypeStr = parts[1] || '1';
+      const tierStr = parts[2];
       if (address) {
         indexerService.cacheAgent({
           agent_id: address.trim(),
-          service_type: parseInt(serviceTypeStr || '1', 10),
+          service_type: parseInt(serviceTypeStr, 10),
           endpoint_hash: '',
-          tier: 0 as import('./types').Tier,
+          tier: (tierStr !== undefined ? parseInt(tierStr, 10) : 0) as import('./types').Tier,
           is_active: true,
-          registered_at: Date.now(),
+          registered_at: Date.now() - Math.floor(Math.random() * 7 * 86_400_000),
         }, true);
-        logger.info(`Seeded agent: ${address.trim()}`);
+        logger.info(`Seeded agent: ${address.trim()} (type=${serviceTypeStr}, tier=${tierStr || '0'})`);
       }
     }
   }
