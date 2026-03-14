@@ -131,6 +131,8 @@ export default function ClientDashboard() {
 
   useEffect(() => {
     handleSearch();
+    const interval = setInterval(handleSearch, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   // Load My Jobs when switching to jobs tab
