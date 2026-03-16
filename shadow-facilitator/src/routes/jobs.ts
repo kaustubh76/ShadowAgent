@@ -17,7 +17,7 @@ const jobLimiter = createAddressRateLimiter({
 // Jobs expire after 30 days
 const JOB_TTL_MS = 30 * 86_400_000;
 
-interface JobRecord {
+export interface JobRecord {
   job_id: string;
   job_hash: string;
   agent: string;
@@ -182,5 +182,39 @@ router.patch('/:jobId', jobLimiter, async (req: Request, res: Response) => {
 
   res.json({ success: true, job });
 });
+
+// Seed jobs directly into the store (called from index.ts on startup)
+export function seedJobs(
+  jobs: Partial<JobRecord>[]
+): number {
+  let seeded = 0;
+  for (const jobData of jobs) {
+    const job_id = `job_seed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const job_hash = `hash_seed_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const now = new Date().toISOString();
+    const job: JobRecord = {
+      job_id,
+      job_hash,
+      agent: jobData.agent || '',
+      client: jobData.client || '',
+      title: jobData.title || 'Untitled Job',
+      description: jobData.description || '',
+      service_type: jobData.service_type || 1,
+      pricing: jobData.pricing || 1000000,
+      escrow_amount: jobData.escrow_amount || 1000000,
+      secret_hash: jobData.secret_hash || `seed_${Math.random().toString(36).slice(2, 10)}`,
+      multisig_enabled: jobData.multisig_enabled || false,
+      signers: jobData.signers,
+      required_signatures: jobData.required_signatures,
+      escrow_status: jobData.escrow_status || 'pending',
+      status: jobData.status || 'open',
+      created_at: now,
+      updated_at: now,
+    };
+    jobStore.set(job_id, job);
+    seeded++;
+  }
+  return seeded;
+}
 
 export default router;

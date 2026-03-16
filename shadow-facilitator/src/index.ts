@@ -234,6 +234,21 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
     }
   }
 
+  // Seed jobs on startup (JSON array from SEED_JOBS env var)
+  const seedJobsEnv = process.env.SEED_JOBS;
+  if (seedJobsEnv) {
+    try {
+      const jobDefs = JSON.parse(seedJobsEnv);
+      if (Array.isArray(jobDefs)) {
+        const { seedJobs } = await import('./routes/jobs');
+        const count = seedJobs(jobDefs);
+        logger.info(`Seeded ${count} jobs`);
+      }
+    } catch (err) {
+      logger.error('Failed to parse SEED_JOBS:', err);
+    }
+  }
+
 });
 
 // Register shutdown cleanup in dependency order (LIFO — last registered runs first)
