@@ -4,6 +4,7 @@ import { Router, Request, Response } from 'express';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress, isPositiveNumber } from '../utils/validation';
 
 const router = Router();
 
@@ -53,6 +54,21 @@ router.post('/', disputeLimiter, async (req: Request, res: Response) => {
       res.status(400).json({
         error: 'Missing required fields: agent, job_hash, escrow_amount, evidence_hash',
       });
+      return;
+    }
+
+    if (!isValidAleoAddress(agent)) {
+      res.status(400).json({ error: 'agent must be a valid Aleo address' });
+      return;
+    }
+
+    if (!isPositiveNumber(escrow_amount)) {
+      res.status(400).json({ error: 'escrow_amount must be a positive number' });
+      return;
+    }
+
+    if (client && !isValidAleoAddress(client)) {
+      res.status(400).json({ error: 'client must be a valid Aleo address if provided' });
       return;
     }
 
@@ -158,6 +174,9 @@ router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res:
 
 // POST /disputes/:jobHash/resolve - Admin resolves dispute
 const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS || 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+if (!process.env.ADMIN_ADDRESS) {
+  console.warn('[disputes] WARNING: ADMIN_ADDRESS not set in environment, using default zero address');
+}
 
 router.post('/:jobHash/resolve', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;

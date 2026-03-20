@@ -3,6 +3,7 @@
 import { Router, Request, Response } from 'express';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress, isPositiveNumber, isPositiveInteger } from '../utils/validation';
 
 const router = Router();
 
@@ -58,13 +59,23 @@ router.post('/', jobLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (service_type < 1 || service_type > 7) {
-      res.status(400).json({ error: 'service_type must be between 1 and 7' });
+    if (!isValidAleoAddress(agent)) {
+      res.status(400).json({ error: 'agent must be a valid Aleo address' });
       return;
     }
 
-    if (pricing <= 0 || escrow_amount <= 0) {
-      res.status(400).json({ error: 'pricing and escrow_amount must be positive' });
+    if (!isValidAleoAddress(client)) {
+      res.status(400).json({ error: 'client must be a valid Aleo address' });
+      return;
+    }
+
+    if (!isPositiveInteger(service_type) || service_type < 1 || service_type > 7) {
+      res.status(400).json({ error: 'service_type must be an integer between 1 and 7' });
+      return;
+    }
+
+    if (!isPositiveNumber(pricing) || !isPositiveNumber(escrow_amount)) {
+      res.status(400).json({ error: 'pricing and escrow_amount must be positive numbers' });
       return;
     }
 
@@ -72,6 +83,12 @@ router.post('/', jobLimiter, async (req: Request, res: Response) => {
       if (!Array.isArray(signers) || signers.length !== 3) {
         res.status(400).json({ error: 'When multisig_enabled, signers must be array of 3 addresses' });
         return;
+      }
+      for (let i = 0; i < 3; i++) {
+        if (!isValidAleoAddress(signers[i])) {
+          res.status(400).json({ error: `signers[${i}] is not a valid Aleo address` });
+          return;
+        }
       }
       if (!required_signatures || required_signatures < 1 || required_signatures > 3) {
         res.status(400).json({ error: 'required_signatures must be 1, 2, or 3' });

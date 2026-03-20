@@ -3,28 +3,37 @@
 import { Router, Request, Response } from 'express';
 import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress, isPositiveNumber, isPositiveInteger, SAFE_LIMITS } from '../utils/validation';
 
 const router = Router();
 
 // Sliding window size for rate limiting (default 10min = ~100 blocks at 6s/block)
 const RATE_WINDOW_MS = config.rateLimit.session.windowMs;
 
-// Per-session mutex to prevent TOCTOU race on concurrent requests
-const sessionLocks = new Map<string, Promise<void>>();
+// Per-session queued mutex to prevent TOCTOU race on concurrent requests
+const sessionLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
 
 async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-  const existing = sessionLocks.get(sessionId);
-  if (existing) await existing;
+  if (!sessionLocks.has(sessionId)) {
+    sessionLocks.set(sessionId, { queue: [], active: false });
+  }
+  const lock = sessionLocks.get(sessionId)!;
 
-  let release: () => void;
-  const lock = new Promise<void>(resolve => { release = resolve; });
-  sessionLocks.set(sessionId, lock);
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
 
   try {
     return await fn();
   } finally {
-    release!();
-    sessionLocks.delete(sessionId);
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) {
+      next();
+    } else {
+      sessionLocks.delete(sessionId);
+    }
   }
 }
 
@@ -240,8 +249,38 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    if (max_total <= 0 || max_per_request <= 0 || rate_limit <= 0 || duration_blocks <= 0) {
-      res.status(400).json({ error: 'max_total, max_per_request, rate_limit, and duration_blocks must be positive' });
+    if (!isValidAleoAddress(agent)) {
+      res.status(400).json({ error: 'agent must be a valid Aleo address' });
+      return;
+    }
+
+    if (client && !isValidAleoAddress(client)) {
+      res.status(400).json({ error: 'client must be a valid Aleo address if provided' });
+      return;
+    }
+
+    if (!isPositiveNumber(max_total) || !isPositiveNumber(max_per_request)) {
+      res.status(400).json({ error: 'max_total and max_per_request must be positive numbers' });
+      return;
+    }
+
+    if (!isPositiveInteger(rate_limit) || !isPositiveInteger(duration_blocks)) {
+      res.status(400).json({ error: 'rate_limit and duration_blocks must be positive integers' });
+      return;
+    }
+
+    if (max_total > SAFE_LIMITS.MAX_TOTAL) {
+      res.status(400).json({ error: `max_total exceeds maximum allowed (${SAFE_LIMITS.MAX_TOTAL})` });
+      return;
+    }
+
+    if (rate_limit > SAFE_LIMITS.MAX_RATE_LIMIT) {
+      res.status(400).json({ error: `rate_limit exceeds maximum allowed (${SAFE_LIMITS.MAX_RATE_LIMIT})` });
+      return;
+    }
+
+    if (duration_blocks > SAFE_LIMITS.MAX_DURATION_BLOCKS) {
+      res.status(400).json({ error: `duration_blocks exceeds maximum allowed (${SAFE_LIMITS.MAX_DURATION_BLOCKS})` });
       return;
     }
 
@@ -504,62 +543,68 @@ router.post('/:sessionId/close', async (req: Request, res: Response) => {
 // POST /sessions/:sessionId/pause - Pause session
 router.post('/:sessionId/pause', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const { client } = req.body;
-  const session = sessionStore.get(sessionId);
 
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  await withSessionLock(sessionId, async () => {
+    const { client } = req.body;
+    const session = sessionStore.get(sessionId);
 
-  const pauseCaller = client || req.body.agent;
-  if (!pauseCaller || (pauseCaller !== session.client && pauseCaller !== session.agent)) {
-    res.status(403).json({ error: 'Only the session client or agent can pause the session' });
-    return;
-  }
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  if (session.status !== 'active') {
-    res.status(400).json({ error: `Cannot pause session in status: ${session.status}` });
-    return;
-  }
+    const pauseCaller = client || req.body.agent;
+    if (!pauseCaller || (pauseCaller !== session.client && pauseCaller !== session.agent)) {
+      res.status(403).json({ error: 'Only the session client or agent can pause the session' });
+      return;
+    }
 
-  session.status = 'paused';
-  session.updated_at = new Date().toISOString();
+    if (session.status !== 'active') {
+      res.status(400).json({ error: `Cannot pause session in status: ${session.status}` });
+      return;
+    }
 
-  res.json({
-    success: true,
-    session,
+    session.status = 'paused';
+    session.updated_at = new Date().toISOString();
+
+    res.json({
+      success: true,
+      session,
+    });
   });
 });
 
 // POST /sessions/:sessionId/resume - Resume paused session
 router.post('/:sessionId/resume', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const { client } = req.body;
-  const session = sessionStore.get(sessionId);
 
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  await withSessionLock(sessionId, async () => {
+    const { client } = req.body;
+    const session = sessionStore.get(sessionId);
 
-  const resumeCaller = client || req.body.agent;
-  if (!resumeCaller || (resumeCaller !== session.client && resumeCaller !== session.agent)) {
-    res.status(403).json({ error: 'Only the session client or agent can resume the session' });
-    return;
-  }
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  if (session.status !== 'paused') {
-    res.status(400).json({ error: `Cannot resume session in status: ${session.status}` });
-    return;
-  }
+    const resumeCaller = client || req.body.agent;
+    if (!resumeCaller || (resumeCaller !== session.client && resumeCaller !== session.agent)) {
+      res.status(403).json({ error: 'Only the session client or agent can resume the session' });
+      return;
+    }
 
-  session.status = 'active';
-  session.updated_at = new Date().toISOString();
+    if (session.status !== 'paused') {
+      res.status(400).json({ error: `Cannot resume session in status: ${session.status}` });
+      return;
+    }
 
-  res.json({
-    success: true,
-    session,
+    session.status = 'active';
+    session.updated_at = new Date().toISOString();
+
+    res.json({
+      success: true,
+      session,
+    });
   });
 });
 

@@ -4,6 +4,7 @@ import { Router, Request, Response } from 'express';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress, isPositiveNumber } from '../utils/validation';
 
 const router = Router();
 
@@ -43,18 +44,28 @@ router.post('/', refundLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (total_amount <= 0) {
-      res.status(400).json({ error: 'Total amount must be positive' });
+    if (!isValidAleoAddress(agent)) {
+      res.status(400).json({ error: 'agent must be a valid Aleo address' });
       return;
     }
 
-    if (agent_amount < 0) {
-      res.status(400).json({ error: 'Agent amount cannot be negative' });
+    if (req.body.client && !isValidAleoAddress(req.body.client)) {
+      res.status(400).json({ error: 'client must be a valid Aleo address if provided' });
       return;
     }
 
-    if (agent_amount > total_amount) {
-      res.status(400).json({ error: 'Agent amount cannot exceed total amount' });
+    if (!isPositiveNumber(total_amount)) {
+      res.status(400).json({ error: 'total_amount must be a positive number' });
+      return;
+    }
+
+    if (typeof agent_amount !== 'number' || !Number.isFinite(agent_amount) || agent_amount < 0) {
+      res.status(400).json({ error: 'agent_amount must be a non-negative number' });
+      return;
+    }
+
+    if (agent_amount >= total_amount) {
+      res.status(400).json({ error: 'agent_amount must be less than total_amount' });
       return;
     }
 
@@ -116,7 +127,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // POST /refunds/:jobHash/accept - Agent accepts refund proposal
-router.post('/:jobHash/accept', async (req: Request, res: Response) => {
+router.post('/:jobHash/accept', refundLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { agent_id } = req.body;
   const proposal = refundStore.get(jobHash);
@@ -146,7 +157,7 @@ router.post('/:jobHash/accept', async (req: Request, res: Response) => {
 });
 
 // POST /refunds/:jobHash/reject - Agent rejects refund proposal
-router.post('/:jobHash/reject', async (req: Request, res: Response) => {
+router.post('/:jobHash/reject', refundLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { agent_id } = req.body;
   const proposal = refundStore.get(jobHash);

@@ -4,6 +4,7 @@ import { Router, Request, Response } from 'express';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress, isPositiveNumber, isNonNegativeInteger, SAFE_LIMITS } from '../utils/validation';
 
 const router = Router();
 
@@ -85,13 +86,45 @@ router.post('/', multisigLimiter, async (req: Request, res: Response) => {
       return;
     }
 
+    if (!isValidAleoAddress(agent)) {
+      res.status(400).json({ error: 'agent must be a valid Aleo address' });
+      return;
+    }
+
+    if (!isPositiveNumber(amount)) {
+      res.status(400).json({ error: 'amount must be a positive number' });
+      return;
+    }
+
+    if (amount > SAFE_LIMITS.MAX_ESCROW) {
+      res.status(400).json({ error: `amount exceeds maximum allowed (${SAFE_LIMITS.MAX_ESCROW})` });
+      return;
+    }
+
     if (!Array.isArray(signers) || signers.length !== 3) {
       res.status(400).json({ error: 'signers must be an array of exactly 3 addresses' });
       return;
     }
 
+    for (let i = 0; i < 3; i++) {
+      if (!isValidAleoAddress(signers[i])) {
+        res.status(400).json({ error: `signers[${i}] is not a valid Aleo address` });
+        return;
+      }
+    }
+
     if (required_signatures < 1 || required_signatures > 3) {
       res.status(400).json({ error: 'required_signatures must be 1, 2, or 3' });
+      return;
+    }
+
+    if (deadline !== undefined && (!isNonNegativeInteger(deadline) || deadline > SAFE_LIMITS.MAX_DEADLINE)) {
+      res.status(400).json({ error: 'deadline must be a non-negative integer within safe range' });
+      return;
+    }
+
+    if (owner && !isValidAleoAddress(owner)) {
+      res.status(400).json({ error: 'owner must be a valid Aleo address if provided' });
       return;
     }
 

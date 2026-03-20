@@ -7,6 +7,7 @@ import { SearchParams, ServiceType, Tier } from '../types';
 import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
+import { isValidAleoAddress } from '../utils/validation';
 
 const router = Router();
 
@@ -82,11 +83,6 @@ const nullifierStore = new TTLStore<boolean>({
   maxSize: 500_000,
   defaultTTLMs: 365 * 86_400_000,
 });
-
-// Validate Aleo address format: must start with "aleo1" and contain valid characters
-function isValidAleoAddress(address: string): boolean {
-  return typeof address === 'string' && /^aleo1[a-z0-9]{5,}$/.test(address);
-}
 
 // POST /agents/register - Notify facilitator of on-chain agent registration
 router.post('/register', registrationLimiter, async (req: Request, res: Response) => {
