@@ -106,8 +106,9 @@ export async function fetchWithRetry(
 
 const _cache = new Map<string, { data: unknown; ts: number }>();
 const CACHE_TTL = 30_000; // 30 seconds
+const MAX_CACHE_SIZE = 200; // Cap to prevent unbounded memory growth
 
-// Periodically evict expired entries to prevent unbounded memory growth
+// Periodically evict expired entries
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of _cache.entries()) {
@@ -123,6 +124,11 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCache(key: string, data: unknown) {
+  // Evict oldest entry if at capacity
+  if (_cache.size >= MAX_CACHE_SIZE && !_cache.has(key)) {
+    const oldestKey = _cache.keys().next().value;
+    if (oldestKey !== undefined) _cache.delete(oldestKey);
+  }
   _cache.set(key, { data, ts: Date.now() });
 }
 
@@ -1116,7 +1122,7 @@ export async function getJob(jobId: string): Promise<JobInfo | null> {
 // Update job status
 export async function updateJobStatus(
   jobId: string,
-  updates: { status?: string; escrow_status?: string }
+  updates: { status?: string; escrow_status?: string; caller?: string }
 ): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
 
   try {

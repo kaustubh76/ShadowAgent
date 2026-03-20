@@ -58,7 +58,7 @@ export default function JobsPanel({ agentAddress }: JobsPanelProps) {
   const handleStatusUpdate = async (jobId: string, newStatus: string) => {
     setUpdatingJobId(jobId);
     try {
-      const result = await updateJobStatus(jobId, { status: newStatus });
+      const result = await updateJobStatus(jobId, { status: newStatus, caller: agentAddress });
       if (result.success && result.job) {
         updateJob(jobId, { status: result.job.status, updated_at: result.job.updated_at });
         const txTypeMap: Record<string, 'job_started' | 'job_completed' | 'job_cancelled'> = {
