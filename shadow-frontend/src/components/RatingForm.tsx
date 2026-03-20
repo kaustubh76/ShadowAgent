@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Star } from 'lucide-react';
+
+interface RatableJob {
+  job_id: string;
+  job_hash: string;
+  title: string;
+}
 
 interface RatingFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (rating: number, jobHash: string) => void;
   agentAddress: string;
+  initialJobHash?: string;
+  ratableJobs?: RatableJob[];
 }
 
 export default function RatingForm({
@@ -13,11 +21,17 @@ export default function RatingForm({
   onClose,
   onSubmit,
   agentAddress,
+  initialJobHash,
+  ratableJobs,
 }: RatingFormProps) {
   const [selectedRating, setSelectedRating] = useState(0);
   const [hoveredRating, setHoveredRating] = useState(0);
-  const [jobHash, setJobHash] = useState('');
+  const [jobHash, setJobHash] = useState(initialJobHash || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialJobHash) setJobHash(initialJobHash);
+  }, [initialJobHash]);
 
   // Convert 1-5 stars to 10-50 scaled rating for API
   const scaledRating = selectedRating * 10;
@@ -92,16 +106,29 @@ export default function RatingForm({
           )}
         </div>
 
-        {/* Job Hash */}
+        {/* Job Selection */}
         <div className="mb-6">
-          <label className="text-sm text-gray-400 mb-2 block">Job Hash</label>
-          <input
-            type="text"
-            value={jobHash}
-            onChange={(e) => setJobHash(e.target.value)}
-            placeholder="Enter the job hash for this service"
-            className="w-full bg-surface-2 border border-white/[0.06] rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-500/40 font-mono"
-          />
+          <label className="text-sm text-gray-400 mb-2 block">Job</label>
+          {ratableJobs && ratableJobs.length > 0 ? (
+            <select
+              value={jobHash}
+              onChange={(e) => setJobHash(e.target.value)}
+              className="w-full bg-surface-2 border border-white/[0.06] rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-yellow-500/40"
+            >
+              <option value="">Select a completed job...</option>
+              {ratableJobs.map(j => (
+                <option key={j.job_id} value={j.job_hash}>{j.title}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={jobHash}
+              onChange={(e) => setJobHash(e.target.value)}
+              placeholder="Enter the job hash for this service"
+              className="w-full bg-surface-2 border border-white/[0.06] rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-500/40 font-mono"
+            />
+          )}
         </div>
 
         {/* Actions */}

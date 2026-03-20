@@ -890,6 +890,8 @@ export default function AgentDetails() {
             }
           }}
           agentAddress={agent.agent_id}
+          initialJobHash={selectedJob?.job_hash || ''}
+          ratableJobs={ratableJobs}
         />
       )}
       {showSessionManager && (
