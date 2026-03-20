@@ -135,9 +135,11 @@ export default function ClientDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load My Jobs when switching to jobs tab
+  // Load My Jobs when switching to jobs tab + auto-refresh every 60s
   useEffect(() => {
-    if (activeTab === 'jobs' && connected && address) {
+    if (activeTab !== 'jobs' || !connected || !address) return;
+
+    const loadJobs = () => {
       setJobsLoading(true);
       setJobsError(null);
       fetchJobs({ client: address }).then((jobs) => {
@@ -147,7 +149,11 @@ export default function ClientDashboard() {
         setJobsError(err instanceof Error ? err.message : 'Failed to load jobs');
         setJobsLoading(false);
       });
-    }
+    };
+
+    loadJobs();
+    const interval = setInterval(loadJobs, 60_000);
+    return () => clearInterval(interval);
   }, [activeTab, connected, address]);
 
   const filteredJobs = useMemo(() => {
