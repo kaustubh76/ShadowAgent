@@ -2,10 +2,22 @@
 // Tests API functions against a live facilitator instance.
 // Skips gracefully when VITE_FACILITATOR_URL is not set.
 
-const FACILITATOR_URL = import.meta.env.VITE_FACILITATOR_URL || '';
+// Use 127.0.0.1 instead of localhost to avoid IPv6 resolution issues in happy-dom
+const FACILITATOR_URL = (import.meta.env.VITE_FACILITATOR_URL || '').replace('localhost', '127.0.0.1');
 const hasFacilitator = Boolean(FACILITATOR_URL);
 
 const describeFacilitator = hasFacilitator ? describe : describe.skip;
+
+// Helper to generate valid-format Aleo test addresses (aleo1 + 58 lowercase alnum chars)
+function testAddress(seed: string): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const base = seed.toLowerCase().replace(/[^a-z0-9]/g, '');
+  let padded = base;
+  while (padded.length < 58) {
+    padded += chars[(padded.length * 7 + seed.length) % chars.length];
+  }
+  return 'aleo1' + padded.slice(0, 58);
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Direct fetch tests against real facilitator
@@ -44,8 +56,8 @@ describeFacilitator('Frontend API — Real facilitator', () => {
 
 describeFacilitator('Session API — Real facilitator', () => {
   let sessionId: string;
-  const client = 'aleo1frontendclient' + Date.now().toString(36);
-  const agent = 'aleo1frontendagent' + Date.now().toString(36);
+  const client = testAddress('frontendclient' + Date.now().toString(36));
+  const agent = testAddress('frontendagent' + Date.now().toString(36));
 
   test('create session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions`, {
@@ -77,6 +89,8 @@ describeFacilitator('Session API — Real facilitator', () => {
   test('close session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/${sessionId}/close`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client }),
     });
     const body = await res.json();
     expect(res.ok).toBe(true);
@@ -85,14 +99,17 @@ describeFacilitator('Session API — Real facilitator', () => {
 });
 
 describeFacilitator('Dispute API — Real facilitator', () => {
+  const disputeAgent = testAddress('feagent');
+  const disputeClient = testAddress('feclient');
+
   test('submit and fetch dispute', async () => {
     const jobHash = 'fe-dispute-' + Date.now();
     const createRes = await fetch(`${FACILITATOR_URL}/disputes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1feagent',
-        client: 'aleo1feclient',
+        agent: disputeAgent,
+        client: disputeClient,
         job_hash: jobHash,
         escrow_amount: 50_000,
         evidence_hash: 'fe-evidence-' + Date.now(),
@@ -100,7 +117,7 @@ describeFacilitator('Dispute API — Real facilitator', () => {
     });
     expect(createRes.status).toBe(201);
 
-    const fetchRes = await fetch(`${FACILITATOR_URL}/disputes?client=aleo1feclient`);
+    const fetchRes = await fetch(`${FACILITATOR_URL}/disputes?client=${disputeClient}`);
     const disputes = await fetchRes.json();
     expect(Array.isArray(disputes)).toBe(true);
     expect(disputes.length).toBeGreaterThan(0);
@@ -114,8 +131,8 @@ describeFacilitator('Refund API — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1ferefundagent',
-        client: 'aleo1ferefundclient',
+        agent: testAddress('ferefundagent'),
+        client: testAddress('ferefundclient'),
         total_amount: 80_000,
         agent_amount: 50_000,
         job_hash: jobHash,
@@ -132,12 +149,11 @@ describeFacilitator('Refund API — Real facilitator', () => {
 
 describeFacilitator('Rating API — Real facilitator', () => {
   test('submit rating to registered agent', async () => {
-    // First register an agent
     const regRes = await fetch(`${FACILITATOR_URL}/agents/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        address: 'aleo1ratingtestagent' + Date.now().toString(36),
+        address: testAddress('ratingtestagent' + Date.now().toString(36)),
         service_type: 1,
       }),
     });
@@ -161,7 +177,7 @@ describeFacilitator('Rating API — Real facilitator', () => {
 
 describeFacilitator('Policy API — Real facilitator', () => {
   let policyId: string;
-  const owner = 'aleo1fepolicyowner' + Date.now().toString(36);
+  const owner = testAddress('fepolicyowner' + Date.now().toString(36));
 
   test('create policy', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/policies`, {

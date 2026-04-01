@@ -10,17 +10,24 @@ config({ path: resolve(__dirname, '../../.env.test') });
 import { AleoService } from './services/aleo';
 
 const FACILITATOR_URL = process.env.FACILITATOR_URL || 'http://localhost:3000';
-const CLIENT_KEY = process.env.ALEO_PRIVATE_KEY_CLIENT || '';
-const AGENT_KEY = process.env.ALEO_PRIVATE_KEY_AGENT || '';
 const hasFacilitator = Boolean(process.env.FACILITATOR_URL);
 
 const describeFacilitator = hasFacilitator ? describe : describe.skip;
 
-// Helper to derive address from private key without importing SDK WASM
-async function getAddressFromKey(key: string): Promise<string> {
-  // Use the SDK crypto module
-  const { getAddress } = await import(resolve(__dirname, '../../shadow-sdk/src/crypto'));
-  return getAddress(key);
+// Pre-computed addresses from .env.test — avoids WASM import in CJS Jest
+const CLIENT_ADDRESS = process.env.ALEO_ADDRESS_CLIENT || '';
+const AGENT_ADDRESS = process.env.ALEO_ADDRESS_AGENT || '';
+
+// Helper to generate valid-format Aleo test addresses (aleo1 + 58 lowercase alnum chars)
+function testAddress(seed: string): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const base = seed.toLowerCase().replace(/[^a-z0-9]/g, '');
+  let padded = base;
+  // Deterministically pad to 58 chars using the seed cycling
+  while (padded.length < 58) {
+    padded += chars[(padded.length * 7 + seed.length) % chars.length];
+  }
+  return 'aleo1' + padded.slice(0, 58);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -143,20 +150,14 @@ describeFacilitator('Health endpoints — Real facilitator', () => {
 
 describeFacilitator('Agent routes — Real facilitator', () => {
   let agentId: string;
-  let agentAddress: string;
-
-  beforeAll(async () => {
-    if (AGENT_KEY) {
-      agentAddress = await getAddressFromKey(AGENT_KEY);
-    }
-  }, 30_000);
+  const agentAddress = AGENT_ADDRESS || testAddress('facilitatoragent');
 
   test('POST /agents/register creates agent', async () => {
     const res = await fetch(`${FACILITATOR_URL}/agents/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        address: agentAddress || 'aleo1testfacilitatoragent' + Date.now(),
+        address: agentAddress,
         service_type: 3, // Code
       }),
     });
@@ -234,8 +235,8 @@ describeFacilitator('Agent routes — Real facilitator', () => {
 
 describeFacilitator('Session routes — Real facilitator', () => {
   let sessionId: string;
-  const clientAddr = 'aleo1client' + Date.now().toString(36);
-  const agentAddr = 'aleo1agent' + Date.now().toString(36);
+  const clientAddr = testAddress('sessionclient' + Date.now().toString(36));
+  const agentAddr = testAddress('sessionagent' + Date.now().toString(36));
 
   test('POST /sessions creates session', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions`, {
@@ -352,7 +353,7 @@ describeFacilitator('Session routes — Real facilitator', () => {
 
 describeFacilitator('Policy routes — Real facilitator', () => {
   let policyId: string;
-  const owner = 'aleo1policyowner' + Date.now().toString(36);
+  const owner = testAddress('policyowner' + Date.now().toString(36));
 
   test('POST /sessions/policies creates policy', async () => {
     const res = await fetch(`${FACILITATOR_URL}/sessions/policies`, {
@@ -388,7 +389,7 @@ describeFacilitator('Policy routes — Real facilitator', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client: owner,
-        agent: 'aleo1policyagent' + Date.now().toString(36),
+        agent: testAddress('policyagent' + Date.now().toString(36)),
         max_total: 500_000,
         max_per_request: 50_000,
         rate_limit: 5,
@@ -415,8 +416,8 @@ describeFacilitator('Dispute routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1disputeagent',
-        client: 'aleo1disputeclient',
+        agent: testAddress('disputeagent'),
+        client: testAddress('disputeclient'),
         job_hash: jobHash,
         escrow_amount: 100_000,
         evidence_hash: 'evidence-' + Date.now(),
@@ -433,7 +434,7 @@ describeFacilitator('Dispute routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent_id: 'aleo1disputeagent',
+        agent_id: testAddress('disputeagent'),
         evidence_hash: 'counter-evidence-' + Date.now(),
       }),
     });
@@ -470,8 +471,8 @@ describeFacilitator('Refund routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1refundagent',
-        client: 'aleo1refundclient',
+        agent: testAddress('refundagent'),
+        client: testAddress('refundclient'),
         total_amount: 100_000,
         agent_amount: 70_000,
         job_hash: jobHash,
@@ -496,7 +497,7 @@ describeFacilitator('Refund routes — Real facilitator', () => {
     const res = await fetch(`${FACILITATOR_URL}/refunds/${jobHash}/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'aleo1refundagent' }),
+      body: JSON.stringify({ agent_id: testAddress('refundagent') }),
     });
     const body = await res.json() as any;
     console.log('Accept refund:', body);
@@ -510,8 +511,8 @@ describeFacilitator('Refund routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1refundagent2',
-        client: 'aleo1refundclient2',
+        agent: testAddress('refundagent2'),
+        client: testAddress('refundclient2'),
         total_amount: 50_000,
         agent_amount: 30_000,
         job_hash: rejectHash,
@@ -521,7 +522,7 @@ describeFacilitator('Refund routes — Real facilitator', () => {
     const res = await fetch(`${FACILITATOR_URL}/refunds/${rejectHash}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'aleo1refundagent2' }),
+      body: JSON.stringify({ agent_id: testAddress('refundagent2') }),
     });
     const body = await res.json() as any;
     expect(res.ok).toBe(true);
@@ -542,13 +543,13 @@ describeFacilitator('Multi-sig escrow routes — Real facilitator', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent: 'aleo1msagent',
-        owner: 'aleo1msowner',
+        agent: testAddress('msagent'),
+        owner: testAddress('msowner'),
         amount: 200_000,
         job_hash: jobHash,
         secret_hash: 'secret-hash-' + Date.now(),
-        deadline: Math.floor(Date.now() / 1000) + 86400,
-        signers: ['aleo1signer1', 'aleo1signer2', 'aleo1signer3'],
+        deadline: 100_000,
+        signers: [testAddress('signer1'), testAddress('signer2'), testAddress('signer3')],
         required_signatures: 2,
       }),
     });
@@ -570,7 +571,7 @@ describeFacilitator('Multi-sig escrow routes — Real facilitator', () => {
     const res = await fetch(`${FACILITATOR_URL}/escrows/multisig/${jobHash}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signer_address: 'aleo1signer1' }),
+      body: JSON.stringify({ signer_address: testAddress('signer1') }),
     });
     const body = await res.json() as any;
     console.log('Approve escrow:', body);
