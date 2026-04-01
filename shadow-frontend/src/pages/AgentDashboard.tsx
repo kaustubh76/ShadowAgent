@@ -19,7 +19,7 @@ import {
   isAddressRegistered,
 } from '../services/aleo';
 import { getTierName, useAgentStore } from '../stores/agentStore';
-import { listSessions, fetchJobs } from '../lib/api';
+import { listSessions, fetchJobs, fetchWithRetry } from '../lib/api';
 
 import { API_BASE, FACILITATOR_ENABLED } from '../config';
 import FaucetWidget from '../components/FaucetWidget';
@@ -69,7 +69,7 @@ export default function AgentDashboard() {
       if (registered) {
         if (FACILITATOR_ENABLED) {
           try {
-            const response = await fetch(`${API_BASE}/agents/by-address/${publicKey}`);
+            const response = await fetchWithRetry(`${API_BASE}/agents/by-address/${publicKey}`);
             if (response.ok) {
               const data = await response.json();
               setAgentId(data.agent_id);
@@ -82,7 +82,7 @@ export default function AgentDashboard() {
 
               // Calculate and set decay info
               try {
-                const healthRes = await fetch(`${API_BASE}/health/ready`);
+                const healthRes = await fetchWithRetry(`${API_BASE}/health/ready`);
                 if (healthRes.ok) {
                   const healthData = await healthRes.json();
                   const blockHeight = healthData.blockHeight || 0;

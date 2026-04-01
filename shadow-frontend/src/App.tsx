@@ -114,7 +114,7 @@ function App() {
 
   // Initialize SDK client and run first health check once ready
   useEffect(() => {
-    initializeClient().then(() => checkHealth());
+    initializeClient().then(() => checkHealth()).catch(err => console.warn('[App] SDK init failed:', err));
   }, [initializeClient, checkHealth]);
 
   // Periodically check facilitator health (every 30s)

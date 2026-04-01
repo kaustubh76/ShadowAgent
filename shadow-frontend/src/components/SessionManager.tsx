@@ -25,8 +25,8 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
   // Load sessions and policies for this agent on open
   useEffect(() => {
     if (isOpen && address) {
-      listSessions({ client: address, agent: agentAddress }).then(setSessions);
-      listPolicies({ owner: address }).then(setPolicies);
+      listSessions({ client: address, agent: agentAddress }).then(setSessions).catch(err => console.warn('[SessionManager] Failed to load sessions:', err));
+      listPolicies({ owner: address }).then(setPolicies).catch(err => console.warn('[SessionManager] Failed to load policies:', err));
     }
   }, [isOpen, address, agentAddress, setSessions, setPolicies]);
 
