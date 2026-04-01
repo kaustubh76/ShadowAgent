@@ -62,9 +62,6 @@ function getClient() {
   }
 }
 
-// Empty result when facilitator is unavailable
-const EMPTY_SEARCH: SearchResult = { agents: [], total: 0, limit: 20, offset: 0 };
-
 // ═══════════════════════════════════════════════════════════════════
 // Retry + Cache helpers
 // ═══════════════════════════════════════════════════════════════════
@@ -910,6 +907,10 @@ export async function resolveDispute(
     return { success: false, error: 'Network error resolving dispute' };
   }
 }
+
+// ── Available for future UI integration ──────────────────────────
+// The following functions provide a complete API surface for features
+// that are not yet wired into components but are ready for use.
 
 // Get agent by wallet address
 export async function getAgentByAddress(
