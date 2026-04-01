@@ -83,6 +83,9 @@ export {
   waitForTransaction,
   // Phase 10a: Extension program & decay utilities
   SHADOW_AGENT_EXT_PROGRAM,
+  SHADOW_AGENT_PROGRAM,
+  SHADOW_AGENT_SESSION_PROGRAM,
+  getTransactionRecordOutputs,
   calculateDecayedRating,
   estimateDecayPeriods,
   calculateEffectiveTier,

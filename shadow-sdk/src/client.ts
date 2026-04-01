@@ -15,6 +15,8 @@ import {
   Dispute,
   MultiSigEscrowConfig,
   MultiSigEscrow,
+  PaymentSession,
+  SpendingPolicy,
 } from './types';
 import {
   generateSecret,
@@ -39,6 +41,11 @@ const RATING_BURN_COST = 500_000;
 const DEFAULT_FACILITATOR_URL = 'http://localhost:3000';
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_ADMIN_ADDRESS = 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+
+/** Validate Aleo address format (aleo1 prefix, 63 chars, lowercase alphanumeric) */
+function isValidAleoAddress(addr: string): boolean {
+  return typeof addr === 'string' && /^aleo1[a-z0-9]{54,}$/.test(addr);
+}
 
 /**
  * ShadowAgent Client SDK
@@ -68,6 +75,7 @@ const DEFAULT_ADMIN_ADDRESS = 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
  */
 export class ShadowAgentClient {
   private config: Required<ClientConfig>;
+  private _cachedAddress: string | null = null;
 
   constructor(config: ClientConfig = {}) {
     this.config = {
@@ -77,6 +85,14 @@ export class ShadowAgentClient {
       timeout: config.timeout || DEFAULT_TIMEOUT,
       adminAddress: config.adminAddress || DEFAULT_ADMIN_ADDRESS,
     };
+  }
+
+  /** Get the client's Aleo address (derived from private key, cached after first call) */
+  async getAddress(): Promise<string> {
+    if (!this._cachedAddress) {
+      this._cachedAddress = await getAddress(this.config.privateKey);
+    }
+    return this._cachedAddress;
   }
 
   /**
@@ -445,7 +461,7 @@ export class ShadowAgentClient {
       }
 
       // Notify facilitator for indexing (non-blocking)
-      this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch(() => {});
+      this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch((err) => console.debug('[ShadowAgentClient] facilitator rating notification failed:', err instanceof Error ? err.message : err));
 
       return { success: true, txId };
     } catch (onChainError) {
@@ -606,6 +622,10 @@ export class ShadowAgentClient {
     agentAmount: number,
     jobHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!isValidAleoAddress(agent)) {
+      return { success: false, error: 'Invalid agent address format' };
+    }
+
     if (agentAmount < 0) {
       return { success: false, error: 'Agent amount cannot be negative' };
     }
@@ -657,11 +677,13 @@ export class ShadowAgentClient {
         return null;
       }
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] getPartialRefundStatus: HTTP ${response.status} for ${jobHash}`);
         return null;
       }
 
       return response.json() as Promise<PartialRefundProposal>;
-    } catch {
+    } catch (error) {
+      console.warn('[ShadowAgentClient] getPartialRefundStatus error:', error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -679,6 +701,10 @@ export class ShadowAgentClient {
     escrowAmount: number,
     evidenceHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!isValidAleoAddress(agent)) {
+      return { success: false, error: 'Invalid agent address format' };
+    }
+
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to open a dispute' };
     }
@@ -724,11 +750,13 @@ export class ShadowAgentClient {
         return null;
       }
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] getDisputeStatus: HTTP ${response.status} for ${jobHash}`);
         return null;
       }
 
       return response.json() as Promise<Dispute>;
-    } catch {
+    } catch (error) {
+      console.warn('[ShadowAgentClient] getDisputeStatus error:', error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -747,6 +775,24 @@ export class ShadowAgentClient {
     deadline: number,
     config: MultiSigEscrowConfig
   ): Promise<{ success: boolean; txId?: string; secretHash?: string; error?: string }> {
+    if (!isValidAleoAddress(agent)) {
+      return { success: false, error: 'Invalid agent address format' };
+    }
+
+    if (!config.signers || config.signers.length !== 3) {
+      return { success: false, error: 'Exactly 3 signers required for multi-sig escrow' };
+    }
+
+    for (const signer of config.signers) {
+      if (!isValidAleoAddress(signer)) {
+        return { success: false, error: `Invalid signer address format: ${signer}` };
+      }
+    }
+
+    if (!config.required_signatures || config.required_signatures < 1 || config.required_signatures > 3) {
+      return { success: false, error: 'required_signatures must be between 1 and 3' };
+    }
+
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required for multi-sig escrow' };
     }
@@ -810,11 +856,13 @@ export class ShadowAgentClient {
         return null;
       }
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] getMultiSigEscrowStatus: HTTP ${response.status} for ${jobHash}`);
         return null;
       }
 
       return response.json() as Promise<MultiSigEscrow>;
-    } catch {
+    } catch (error) {
+      console.warn('[ShadowAgentClient] getMultiSigEscrowStatus error:', error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -836,6 +884,13 @@ export class ShadowAgentClient {
   ): Promise<{ success: boolean; sessionId?: string; txId?: string; error?: string }> {
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to create a session' };
+    }
+
+    if (maxPerRequest > maxTotal) {
+      return { success: false, error: 'maxPerRequest cannot exceed maxTotal' };
+    }
+    if (maxTotal <= 0 || maxPerRequest <= 0 || rateLimit <= 0 || durationBlocks <= 0) {
+      return { success: false, error: 'All session parameters must be positive' };
     }
 
     const sessionId = generateSessionId();
@@ -928,11 +983,12 @@ export class ShadowAgentClient {
     }
 
     try {
+      const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/settle`;
       const response = await this.fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settlement_amount: settlementAmount }),
+        body: JSON.stringify({ settlement_amount: settlementAmount, agent: clientAddress }),
       });
 
       if (!response.ok) {
@@ -961,9 +1017,12 @@ export class ShadowAgentClient {
     }
 
     try {
+      const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/close`;
       const response = await this.fetchWithTimeout(url, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client: clientAddress }),
       });
 
       if (!response.ok) {
@@ -988,8 +1047,13 @@ export class ShadowAgentClient {
     sessionId: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/pause`;
-      const response = await this.fetchWithTimeout(url, { method: 'POST' });
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client: clientAddress }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({})) as { error?: string };
@@ -1012,8 +1076,13 @@ export class ShadowAgentClient {
     sessionId: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/resume`;
-      const response = await this.fetchWithTimeout(url, { method: 'POST' });
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client: clientAddress }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({})) as { error?: string };
@@ -1032,7 +1101,7 @@ export class ShadowAgentClient {
   /**
    * Get the status of a session
    */
-  async getSessionStatus(sessionId: string): Promise<import('./types').PaymentSession | null> {
+  async getSessionStatus(sessionId: string): Promise<PaymentSession | null> {
     try {
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}`;
       const response = await this.fetchWithTimeout(url);
@@ -1041,11 +1110,13 @@ export class ShadowAgentClient {
         return null;
       }
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] getSessionStatus: HTTP ${response.status} for ${sessionId}`);
         return null;
       }
 
-      return response.json() as Promise<import('./types').PaymentSession>;
-    } catch {
+      return response.json() as Promise<PaymentSession>;
+    } catch (error) {
+      console.warn('[ShadowAgentClient] getSessionStatus error:', error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -1163,7 +1234,7 @@ export class ShadowAgentClient {
   /**
    * List spending policies for the current user
    */
-  async listPolicies(): Promise<import('./types').SpendingPolicy[]> {
+  async listPolicies(): Promise<SpendingPolicy[]> {
     try {
       const owner = this.config.privateKey
         ? await getAddress(this.config.privateKey)
@@ -1176,11 +1247,13 @@ export class ShadowAgentClient {
       const response = await this.fetchWithTimeout(url);
 
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] listPolicies: HTTP ${response.status}`);
         return [];
       }
 
-      return response.json() as Promise<import('./types').SpendingPolicy[]>;
-    } catch {
+      return response.json() as Promise<SpendingPolicy[]>;
+    } catch (error) {
+      console.warn('[ShadowAgentClient] listPolicies error:', error instanceof Error ? error.message : error);
       return [];
     }
   }
@@ -1188,7 +1261,7 @@ export class ShadowAgentClient {
   /**
    * Get a specific spending policy
    */
-  async getPolicy(policyId: string): Promise<import('./types').SpendingPolicy | null> {
+  async getPolicy(policyId: string): Promise<SpendingPolicy | null> {
     try {
       const url = `${this.config.facilitatorUrl}/sessions/policies/${policyId}`;
       const response = await this.fetchWithTimeout(url);
@@ -1197,11 +1270,13 @@ export class ShadowAgentClient {
         return null;
       }
       if (!response.ok) {
+        console.warn(`[ShadowAgentClient] getPolicy: HTTP ${response.status} for ${policyId}`);
         return null;
       }
 
-      return response.json() as Promise<import('./types').SpendingPolicy>;
-    } catch {
+      return response.json() as Promise<SpendingPolicy>;
+    } catch (error) {
+      console.warn('[ShadowAgentClient] getPolicy error:', error instanceof Error ? error.message : error);
       return null;
     }
   }

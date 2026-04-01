@@ -37,6 +37,22 @@ import { RecordStore } from './recordStore';
 const DEFAULT_FACILITATOR_URL = 'http://localhost:3000';
 const DEFAULT_PRICE = 100000; // 0.1 credits in microcents
 const DEFAULT_DEADLINE_BLOCKS = 100;
+const DEFAULT_FETCH_TIMEOUT = 30000; // 30 seconds — matches Client timeout
+
+/** Fetch with AbortController-based timeout to prevent indefinite hangs */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout: number = DEFAULT_FETCH_TIMEOUT
+): Promise<globalThis.Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // Store pending jobs and their secrets
 interface PendingJob {
@@ -180,13 +196,13 @@ export class ShadowAgentServer {
       }
 
       // Notify facilitator for indexing (non-blocking)
-      this.notifyFacilitatorRegistration(endpointHash, bondAmount, txId).catch(() => {});
+      this.notifyFacilitatorRegistration(endpointHash, bondAmount, txId).catch((err) => console.debug('[ShadowAgentServer] facilitator registration notification failed:', err instanceof Error ? err.message : err));
 
       return { success: true, agentId: this.agentId, txId };
     } catch (onChainError) {
       try {
         const address = await getAddress(this.config.privateKey!);
-        const res = await fetch(`${this.config.facilitatorUrl}/agents/register`, {
+        const res = await fetchWithTimeout(`${this.config.facilitatorUrl}/agents/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -216,7 +232,7 @@ export class ShadowAgentServer {
   ): Promise<void> {
     try {
       const address = await getAddress(this.config.privateKey);
-      await fetch(`${this.config.facilitatorUrl}/agents/register`, {
+      await fetchWithTimeout(`${this.config.facilitatorUrl}/agents/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +299,7 @@ export class ShadowAgentServer {
       return { success: true, txId };
     } catch (onChainError) {
       try {
-        const res = await fetch(`${this.config.facilitatorUrl}/agents/unregister`, {
+        const res = await fetchWithTimeout(`${this.config.facilitatorUrl}/agents/unregister`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_id: this.agentId, address }),
@@ -414,7 +430,7 @@ export class ShadowAgentServer {
 
       // On-chain verification required when transaction ID is provided
       if (proof.transactionId) {
-        const response = await fetch(
+        const response = await fetchWithTimeout(
           `https://api.explorer.provable.com/v1/testnet/transaction/${proof.transactionId}`
         );
 
@@ -492,7 +508,9 @@ export class ShadowAgentServer {
     // Convert hex secret to a field value for Leo's BHP256 hash check
     // Note: On-chain claim only works for escrows created on-chain where
     // secret_hash was computed with BHP256::hash_to_field (not SHA-256)
-    const secretField = `${BigInt('0x' + pendingJob.secret.slice(0, 16))}field`;
+    // Use up to 62 hex chars (31 bytes) to fit within Aleo field element (< 2^253)
+    const secretHex = pendingJob.secret.slice(0, 62);
+    const secretField = `${BigInt('0x' + secretHex)}field`;
 
     try {
       const txId = await executeProgram(
@@ -612,7 +630,7 @@ export class ShadowAgentServer {
       return { success: true, newTier: this.reputation.tier, txId };
     } catch (onChainError) {
       try {
-        const res = await fetch(`${this.config.facilitatorUrl}/agents/${address}/rating`, {
+        const res = await fetchWithTimeout(`${this.config.facilitatorUrl}/agents/${address}/rating`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -724,7 +742,7 @@ export class ShadowAgentServer {
       : this.agentId;
 
     const url = `${this.config.facilitatorUrl}/agents/by-address/${address}`;
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
 
     if (!response.ok) {
       return null;
@@ -821,7 +839,7 @@ export class ShadowAgentServer {
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
     try {
       const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/accept`;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_id: this.agentId }),
@@ -849,7 +867,7 @@ export class ShadowAgentServer {
     try {
       await this.ensureAgentId();
       const url = `${this.config.facilitatorUrl}/refunds?agent_id=${this.agentId}&status=proposed`;
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
 
       if (!response.ok) return [];
       return response.json() as Promise<PartialRefundProposal[]>;
@@ -866,7 +884,7 @@ export class ShadowAgentServer {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/reject`;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_id: this.agentId }),
@@ -899,7 +917,7 @@ export class ShadowAgentServer {
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
     try {
       const url = `${this.config.facilitatorUrl}/disputes/${jobHash}/respond`;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -930,7 +948,7 @@ export class ShadowAgentServer {
     try {
       await this.ensureAgentId();
       const url = `${this.config.facilitatorUrl}/disputes?agent_id=${this.agentId}&status=open`;
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
 
       if (!response.ok) return [];
       return response.json() as Promise<Dispute[]>;
@@ -1033,7 +1051,7 @@ export class ShadowAgentServer {
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
     try {
       const url = `${this.config.facilitatorUrl}/escrows/multisig/${jobHash}/approve`;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
