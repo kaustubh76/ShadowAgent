@@ -42,7 +42,7 @@ router.get('/', async (req: Request, res: Response) => {
         ? parsedMinTier as Tier
         : undefined,
       is_active: req.query.is_active !== 'false',
-      limit: Math.min(Number.isFinite(parsedLimit) ? parsedLimit : 20, 100),
+      limit: Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 20, 1), 100),
       offset: Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0,
     };
 
@@ -55,6 +55,7 @@ router.get('/', async (req: Request, res: Response) => {
       offset: params.offset,
     });
   } catch (error) {
+    console.error('[agents] Failed to search agents:', error);
     res.status(500).json({ error: 'Failed to search agents' });
   }
 });
@@ -83,6 +84,34 @@ const nullifierStore = new TTLStore<boolean>({
   maxSize: 500_000,
   defaultTTLMs: 365 * 86_400_000,
 });
+
+// Per-nullifier mutex to prevent TOCTOU race on concurrent rating submissions
+const ratingLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
+
+// Periodic cleanup of idle lock entries to prevent unbounded memory growth
+setInterval(() => {
+  for (const [key, lock] of ratingLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) ratingLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
+
+async function withRatingLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  if (!ratingLocks.has(key)) {
+    ratingLocks.set(key, { queue: [], active: false });
+  }
+  const lock = ratingLocks.get(key)!;
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
+  try {
+    return await fn();
+  } finally {
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) next(); else ratingLocks.delete(key);
+  }
+}
 
 // POST /agents/register - Notify facilitator of on-chain agent registration
 router.post('/register', registrationLimiter, async (req: Request, res: Response) => {
@@ -162,6 +191,7 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
       on_chain_verified: onChainVerified,
     });
   } catch (error) {
+    console.error('[agents] Failed to register agent:', error);
     res.status(500).json({ error: 'Failed to register agent' });
   }
 });
@@ -186,6 +216,7 @@ router.post('/unregister', async (req: Request, res: Response) => {
 
     res.json({ success: true, agent_id: id });
   } catch (error) {
+    console.error('[agents] Failed to unregister agent:', error);
     res.status(500).json({ error: 'Failed to unregister agent' });
   }
 });
@@ -221,8 +252,16 @@ router.get('/by-address/:publicKey', async (req: Request, res: Response) => {
       return;
     }
 
-    res.json(fetched);
+    // Enrich with reputation fields for consistent response shape
+    const ratings = ratingStore.get(publicKey) || [];
+    res.json({
+      ...fetched,
+      total_jobs: ratings.length,
+      total_rating_points: ratings.reduce((sum: number, r: RatingRecord) => sum + r.rating, 0),
+      total_revenue: ratings.reduce((sum: number, r: RatingRecord) => sum + r.payment_amount, 0),
+    });
   } catch (error) {
+    console.error('[agents] Failed to look up agent by address:', error);
     res.status(500).json({ error: 'Failed to look up agent by address' });
   }
 });
@@ -252,33 +291,38 @@ router.post('/:agentId/rating', ratingLimiter, async (req: Request, res: Respons
       }
     }
 
-    // Prevent double-rating via nullifier
-    if (nullifier && nullifierStore.has(nullifier)) {
-      res.status(409).json({ error: 'Rating already submitted for this job' });
-      return;
-    }
+    // Wrap nullifier check-and-set in a lock to prevent TOCTOU race
+    const lockKey = nullifier || job_hash;
+    await withRatingLock(lockKey, async () => {
+      // Prevent double-rating via nullifier
+      if (nullifier && nullifierStore.has(nullifier)) {
+        res.status(409).json({ error: 'Rating already submitted for this job' });
+        return;
+      }
 
-    const record: RatingRecord = {
-      job_hash,
-      rating,
-      payment_amount: payment_amount || 0,
-      nullifier,
-      tx_id,
-      on_chain: !!on_chain,
-      created_at: new Date().toISOString(),
-    };
+      const record: RatingRecord = {
+        job_hash,
+        rating,
+        payment_amount: payment_amount || 0,
+        nullifier,
+        tx_id,
+        on_chain: !!on_chain,
+        created_at: new Date().toISOString(),
+      };
 
-    if (!ratingStore.has(agentId)) {
-      ratingStore.set(agentId, []);
-    }
-    ratingStore.get(agentId)!.push(record);
+      if (!ratingStore.has(agentId)) {
+        ratingStore.set(agentId, []);
+      }
+      ratingStore.get(agentId)!.push(record);
 
-    if (nullifier) {
-      nullifierStore.set(nullifier, true);
-    }
+      if (nullifier) {
+        nullifierStore.set(nullifier, true);
+      }
 
-    res.status(201).json({ success: true, rating: record });
+      res.status(201).json({ success: true, rating: record });
+    });
   } catch (error) {
+    console.error('[agents] Failed to submit rating:', error);
     res.status(500).json({ error: 'Failed to submit rating' });
   }
 });
@@ -296,6 +340,7 @@ router.get('/:agentId', async (req: Request, res: Response) => {
 
     res.json(agent);
   } catch (error) {
+    console.error('[agents] Failed to get agent:', error);
     res.status(500).json({ error: 'Failed to get agent' });
   }
 });
@@ -357,6 +402,7 @@ router.get('/:agentId/proof', async (req: Request, res: Response) => {
         : 'Agent is New tier',
     });
   } catch (error) {
+    console.error('[agents] Failed to get proof:', error);
     res.status(500).json({ error: 'Failed to get proof' });
   }
 });

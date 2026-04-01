@@ -96,6 +96,7 @@ router.post('/', disputeLimiter, async (req: Request, res: Response) => {
       dispute,
     });
   } catch (error) {
+    console.error('[disputes] Failed to open dispute:', error);
     res.status(500).json({ error: 'Failed to open dispute' });
   }
 });
@@ -174,16 +175,26 @@ router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res:
 
 // POST /disputes/:jobHash/resolve - Admin resolves dispute
 const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS || 'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 if (!process.env.ADMIN_ADDRESS) {
   console.warn('[disputes] WARNING: ADMIN_ADDRESS not set in environment, using default zero address');
+}
+if (!process.env.ADMIN_SECRET) {
+  console.warn('[disputes] WARNING: ADMIN_SECRET not set — dispute resolution relies only on address check');
 }
 
 router.post('/:jobHash/resolve', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
-  const { agent_percentage, admin_address } = req.body;
+  const { agent_percentage, admin_address, admin_secret } = req.body;
 
   if (!admin_address || admin_address !== ADMIN_ADDRESS) {
     res.status(403).json({ error: 'Only the admin can resolve disputes' });
+    return;
+  }
+
+  // When ADMIN_SECRET is configured, require it for an additional layer of auth
+  if (ADMIN_SECRET && admin_secret !== ADMIN_SECRET) {
+    res.status(403).json({ error: 'Invalid admin credentials' });
     return;
   }
 

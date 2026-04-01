@@ -93,6 +93,7 @@ router.post('/', refundLimiter, async (req: Request, res: Response) => {
       proposal,
     });
   } catch (error) {
+    console.error('[refunds] Failed to create refund proposal:', error);
     res.status(500).json({ error: 'Failed to create refund proposal' });
   }
 });

@@ -123,6 +123,7 @@ router.post('/', jobLimiter, async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, job });
   } catch (error) {
+    console.error('[jobs] Failed to create job:', error);
     res.status(500).json({ error: 'Failed to create job' });
   }
 });
@@ -192,6 +193,11 @@ router.patch('/:jobId', jobLimiter, async (req: Request, res: Response) => {
   }
 
   if (escrow_status) {
+    const validEscrowStatuses = ['pending', 'locked', 'released', 'refunded'];
+    if (!validEscrowStatuses.includes(escrow_status)) {
+      res.status(400).json({ error: `Invalid escrow_status: ${escrow_status}` });
+      return;
+    }
     job.escrow_status = escrow_status;
   }
 

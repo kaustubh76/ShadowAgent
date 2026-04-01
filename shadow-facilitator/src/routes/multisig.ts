@@ -41,6 +41,13 @@ const multisigStore = new TTLStore<MultiSigEscrowRecord>({
 // Per-job queued mutex to prevent race conditions on concurrent approvals
 const approvalLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
 
+// Periodic cleanup of idle lock entries to prevent unbounded memory growth
+setInterval(() => {
+  for (const [key, lock] of approvalLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) approvalLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
+
 async function withJobLock<T>(jobHash: string, fn: () => Promise<T>): Promise<T> {
   if (!approvalLocks.has(jobHash)) {
     approvalLocks.set(jobHash, { queue: [], active: false });
@@ -156,6 +163,7 @@ router.post('/', multisigLimiter, async (req: Request, res: Response) => {
       escrow,
     });
   } catch (error) {
+    console.error('[multisig] Failed to create multi-sig escrow:', error);
     res.status(500).json({ error: 'Failed to create multi-sig escrow' });
   }
 });

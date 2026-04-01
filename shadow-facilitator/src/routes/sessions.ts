@@ -7,11 +7,21 @@ import { isValidAleoAddress, isPositiveNumber, isPositiveInteger, SAFE_LIMITS } 
 
 const router = Router();
 
+// Approximate block duration on Aleo testnet (~6 seconds per block)
+const BLOCK_DURATION_MS = 6000;
+
 // Sliding window size for rate limiting (default 10min = ~100 blocks at 6s/block)
 const RATE_WINDOW_MS = config.rateLimit.session.windowMs;
 
 // Per-session queued mutex to prevent TOCTOU race on concurrent requests
 const sessionLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
+
+// Periodic cleanup of idle lock entries to prevent unbounded memory growth
+setInterval(() => {
+  for (const [key, lock] of sessionLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) sessionLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
 
 async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
   if (!sessionLocks.has(sessionId)) {
@@ -130,6 +140,7 @@ router.post('/policies', async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, policy });
   } catch (error) {
+    console.error('[sessions] Failed to create policy:', error);
     res.status(500).json({ error: 'Failed to create policy' });
   }
 });
@@ -213,7 +224,7 @@ router.post('/policies/:policyId/create-session', async (req: Request, res: Resp
       request_count: 0,
       prev_window_count: 0,
       window_start: Date.now(),
-      valid_until: duration_blocks,
+      valid_until: Date.now() + (duration_blocks * BLOCK_DURATION_MS), // Absolute deadline (ms)
       duration_blocks,
       status: 'active',
       created_at: new Date().toISOString(),
@@ -229,6 +240,7 @@ router.post('/policies/:policyId/create-session', async (req: Request, res: Resp
       policy_id: policyId,
     });
   } catch (error) {
+    console.error('[sessions] Failed to create session from policy:', error);
     res.status(500).json({ error: 'Failed to create session from policy' });
   }
 });
@@ -307,7 +319,7 @@ router.post('/', async (req: Request, res: Response) => {
       request_count: 0,
       prev_window_count: 0,
       window_start: Date.now(),
-      valid_until: duration_blocks, // Relative duration stored
+      valid_until: Date.now() + (duration_blocks * BLOCK_DURATION_MS), // Absolute deadline (ms)
       duration_blocks,
       status: 'active',
       created_at: new Date().toISOString(),
@@ -322,6 +334,7 @@ router.post('/', async (req: Request, res: Response) => {
       session,
     });
   } catch (error) {
+    console.error('[sessions] Failed to create session:', error);
     res.status(500).json({ error: 'Failed to create session' });
   }
 });
@@ -338,6 +351,15 @@ router.get('/', async (req: Request, res: Response) => {
   if (agent) {
     sessions = sessions.filter(s => s.agent === agent);
   }
+  // Auto-close expired sessions before filtering
+  const now = Date.now();
+  for (const s of sessions) {
+    if (s.status === 'active' && now > s.valid_until) {
+      s.status = 'closed';
+      s.updated_at = new Date().toISOString();
+    }
+  }
+
   if (status === 'active') {
     sessions = sessions.filter(s => s.status === 'active');
   } else if (status === 'paused') {
@@ -377,6 +399,14 @@ router.post('/:sessionId/request', async (req: Request, res: Response) => {
 
     if (session.status !== 'active') {
       res.status(400).json({ error: `Session is ${session.status}, not active` });
+      return;
+    }
+
+    // Enforce session expiration based on absolute deadline
+    if (Date.now() > session.valid_until) {
+      session.status = 'closed';
+      session.updated_at = new Date().toISOString();
+      res.status(400).json({ error: 'Session has expired' });
       return;
     }
 
@@ -425,7 +455,7 @@ router.post('/:sessionId/request', async (req: Request, res: Response) => {
     const estimatedCount =
       session.prev_window_count * previousWeight + session.request_count;
 
-    if (estimatedCount + 1 > session.rate_limit) {
+    if (Math.ceil(estimatedCount) + 1 > session.rate_limit) {
       const resetAt = session.window_start + RATE_WINDOW_MS;
       res.status(429).json({
         error: 'Rate limit exceeded for this session',
