@@ -220,16 +220,29 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
       const address = parts[0];
       const serviceTypeStr = parts[1] || '1';
       const tierStr = parts[2];
-      if (address) {
+      const trimmedAddress = address?.trim();
+      if (trimmedAddress && trimmedAddress.startsWith('aleo1') && trimmedAddress.length >= 50) {
+        const parsedType = parseInt(serviceTypeStr, 10);
+        const parsedTier = tierStr !== undefined ? parseInt(tierStr, 10) : 0;
+        if (!Number.isFinite(parsedType) || parsedType < 0 || parsedType > 7) {
+          logger.warn(`Skipping seed agent ${trimmedAddress}: invalid service_type ${serviceTypeStr}`);
+          continue;
+        }
+        if (!Number.isFinite(parsedTier) || parsedTier < 0 || parsedTier > 4) {
+          logger.warn(`Skipping seed agent ${trimmedAddress}: invalid tier ${tierStr}`);
+          continue;
+        }
         indexerService.cacheAgent({
-          agent_id: address.trim(),
-          service_type: parseInt(serviceTypeStr, 10),
+          agent_id: trimmedAddress,
+          service_type: parsedType,
           endpoint_hash: '',
-          tier: (tierStr !== undefined ? parseInt(tierStr, 10) : 0) as import('./types').Tier,
+          tier: parsedTier as import('./types').Tier,
           is_active: true,
           registered_at: Date.now() - Math.floor(Math.random() * 7 * 86_400_000),
         }, true);
-        logger.info(`Seeded agent: ${address.trim()} (type=${serviceTypeStr}, tier=${tierStr || '0'})`);
+        logger.info(`Seeded agent: ${trimmedAddress} (type=${parsedType}, tier=${parsedTier})`);
+      } else if (trimmedAddress) {
+        logger.warn(`Skipping seed agent with invalid address: ${trimmedAddress}`);
       }
     }
   }

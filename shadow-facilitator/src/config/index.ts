@@ -70,4 +70,18 @@ export function validateConfig(): void {
   if (!config.aleo.rpcUrl) {
     throw new Error('ALEO_RPC_URL is required');
   }
+
+  // Validate rate limit values are positive and finite (parseInt on invalid env vars returns NaN)
+  const rateLimits = [
+    { name: 'global.windowMs', value: config.rateLimit.global.windowMs },
+    { name: 'global.maxRequests', value: config.rateLimit.global.maxRequests },
+    { name: 'session.windowMs', value: config.rateLimit.session.windowMs },
+    { name: 'x402.windowMs', value: config.rateLimit.x402.windowMs },
+    { name: 'x402.maxRequests', value: config.rateLimit.x402.maxRequests },
+  ];
+  for (const { name, value } of rateLimits) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`Invalid rate limit config: ${name} must be a positive number, got ${value}`);
+    }
+  }
 }

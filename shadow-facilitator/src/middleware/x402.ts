@@ -282,7 +282,11 @@ export function x402Middleware(options: X402Options = {}) {
             res.setHeader('X-Job-Hash', jobHash);
 
             // Remove from pending (agent can now claim)
-            deletePendingJobData(jobHash);
+            // Note: fire-and-forget is intentional — res.send is synchronous, can't await here.
+            // Errors are logged to prevent silent data leaks.
+            deletePendingJobData(jobHash).catch(err =>
+              console.error('[x402] Failed to delete pending job data:', err)
+            );
           }
           return originalSend(body);
         };
