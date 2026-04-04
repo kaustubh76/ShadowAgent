@@ -9,7 +9,6 @@ export const ANIMATION_DELAY_STAGGER = 0.15;
 
 // Validation constants
 export const MAX_BOND_AMOUNT = 100000;
-export const RATING_BURN_AMOUNT = 0.5;
 export const MIN_BOND_AMOUNT = 1;
 export const MAX_URL_LENGTH = 2048;
 

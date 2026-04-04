@@ -41,6 +41,8 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
     if (result.success) {
       updateSession(sessionId, { status: 'closed' });
       addTransaction({ type: 'session_closed', agentId: agentAddress, amount: result.refund_amount });
+    } else {
+      console.warn('[SessionManager] Failed to close session:', result.error);
     }
   };
 
@@ -48,6 +50,8 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
     const result = await pauseSession(sessionId, address || undefined);
     if (result.success) {
       updateSession(sessionId, { status: 'paused' });
+    } else {
+      console.warn('[SessionManager] Failed to pause session:', result.error);
     }
   };
 
@@ -55,6 +59,8 @@ export default function SessionManager({ isOpen, onClose, agentAddress }: Sessio
     const result = await resumeSession(sessionId, address || undefined);
     if (result.success) {
       updateSession(sessionId, { status: 'active' });
+    } else {
+      console.warn('[SessionManager] Failed to resume session:', result.error);
     }
   };
 

@@ -154,6 +154,7 @@ export const SHADOW_AGENT_EXT_PROGRAM_ID = 'shadow_agent_ext.aleo';
 // Network configuration
 export const ALEO_NETWORK = 'testnet' as const;
 export const ALEO_RPC_URL = 'https://api.explorer.provable.com/v1';
+export const ALEO_RPC_TESTNET_URL = `${ALEO_RPC_URL}/${ALEO_NETWORK}`;
 
 // Contract constants
 export const REGISTRATION_BOND = 10_000_000; // 10 credits in microcredits

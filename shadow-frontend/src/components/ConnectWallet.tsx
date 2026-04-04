@@ -8,6 +8,7 @@ import { ALEO_EXPLORER_URL } from '../constants/ui';
 import { useToast } from '../contexts/ToastContext';
 import { useWalletStore } from '../stores/walletStore';
 import FaucetWidget from './FaucetWidget';
+import { ALEO_RPC_TESTNET_URL } from '../services/aleo';
 
 export default function ConnectWallet() {
   const { publicKey, connected, connecting, connect, disconnect } = useShieldWallet();
@@ -34,9 +35,8 @@ export default function ConnectWallet() {
 
     setIsLoadingBalance(true);
     try {
-      const rpcUrl = 'https://api.explorer.provable.com/v1/testnet';
       const response = await fetch(
-        `${rpcUrl}/program/credits.aleo/mapping/account/${publicKey}`
+        `${ALEO_RPC_TESTNET_URL}/program/credits.aleo/mapping/account/${publicKey}`
       );
 
       if (response.ok) {

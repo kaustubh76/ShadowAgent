@@ -3,6 +3,7 @@
 
 import { FC, ReactNode, useEffect, useState, createContext, useContext, useCallback, useMemo } from 'react';
 import { useWalletStore } from '../stores/walletStore';
+import { ALEO_RPC_URL, ALEO_RPC_TESTNET_URL } from '../services/aleo';
 
 // Shield Wallet context types
 interface ShieldWalletContextType {
@@ -93,14 +94,12 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
 
     const account = new Account({ privateKey });
     const privKey = PrivateKeyClass.from_string(privateKey);
-    const rpcUrl = 'https://api.explorer.provable.com/v1';
-
-    const networkClient = new AleoNetworkClient(rpcUrl);
+    const networkClient = new AleoNetworkClient(ALEO_RPC_URL);
     const keyProvider = new AleoKeyProvider();
     keyProvider.useCache(true);
     const recordProvider = new NetworkRecordProvider(account, networkClient);
 
-    const programManager = new ProgramManager(rpcUrl, keyProvider, recordProvider);
+    const programManager = new ProgramManager(ALEO_RPC_URL, keyProvider, recordProvider);
     programManager.setAccount(account);
 
     const txId = await programManager.execute({
@@ -120,9 +119,8 @@ export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
     if (!publicKey) return [];
 
     try {
-      const rpcUrl = 'https://api.explorer.provable.com/v1/testnet';
       const response = await fetch(
-        `${rpcUrl}/program/${programId}/mapping/account/${publicKey}`
+        `${ALEO_RPC_TESTNET_URL}/program/${programId}/mapping/account/${publicKey}`
       );
       if (!response.ok) return [];
       const data = await response.text();

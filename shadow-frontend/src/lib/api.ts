@@ -221,7 +221,7 @@ export async function verifyReputationProof(proof: ReputationProofInput): Promis
   }
 
   // Fallback to direct fetch
-  const response = await fetch(`${API_BASE}/verify/reputation`, {
+  const response = await fetchWithRetry(`${API_BASE}/verify/reputation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(proof),
@@ -279,7 +279,7 @@ export async function submitDispute(data: {
 }): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/disputes`, {
+    const response = await fetchWithRetry(`${API_BASE}/disputes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -336,7 +336,7 @@ export async function submitRefund(data: {
 }): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/refunds`, {
+    const response = await fetchWithRetry(`${API_BASE}/refunds`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -384,7 +384,7 @@ export async function createMultiSigEscrow(data: {
 }): Promise<{ success: boolean; escrow?: MultiSigEscrowData; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/escrows/multisig`, {
+    const response = await fetchWithRetry(`${API_BASE}/escrows/multisig`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -409,7 +409,7 @@ export async function approveMultiSigEscrow(
 ): Promise<{ success: boolean; escrow?: MultiSigEscrowData; threshold_met?: boolean; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/escrows/multisig/${jobHash}/approve`, {
+    const response = await fetchWithRetry(`${API_BASE}/escrows/multisig/${jobHash}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ signer_address: signerAddress }),
@@ -434,7 +434,7 @@ export async function submitRating(
 ): Promise<{ success: boolean; rating?: Record<string, unknown>; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/agents/${agentId}/rating`, {
+    const response = await fetchWithRetry(`${API_BASE}/agents/${agentId}/rating`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -460,7 +460,7 @@ export async function respondToDispute(
 ): Promise<{ success: boolean; dispute?: DisputeInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/disputes/${jobHash}/respond`, {
+    const response = await fetchWithRetry(`${API_BASE}/disputes/${jobHash}/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ evidence_hash: evidenceHash, agent_id: agentId }),
@@ -485,7 +485,7 @@ export async function acceptRefund(
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/refunds/${jobHash}/accept`, {
+    const response = await fetchWithRetry(`${API_BASE}/refunds/${jobHash}/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: agentId }),
@@ -510,7 +510,7 @@ export async function rejectRefund(
 ): Promise<{ success: boolean; proposal?: RefundInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/refunds/${jobHash}/reject`, {
+    const response = await fetchWithRetry(`${API_BASE}/refunds/${jobHash}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: agentId }),
@@ -565,7 +565,7 @@ export async function createSession(data: {
 }): Promise<{ success: boolean; session?: SessionInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -638,7 +638,7 @@ export async function closeSession(
 ): Promise<{ success: boolean; refund_amount?: number; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/close`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/close`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client: caller, agent: caller }),
@@ -663,7 +663,7 @@ export async function pauseSession(
 ): Promise<{ success: boolean; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/pause`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/pause`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client: caller, agent: caller }),
@@ -688,7 +688,7 @@ export async function resumeSession(
 ): Promise<{ success: boolean; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/resume`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client: caller, agent: caller }),
@@ -733,7 +733,7 @@ export async function createPolicy(data: {
 }): Promise<{ success: boolean; policy?: PolicyInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/policies`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/policies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -808,7 +808,7 @@ export async function createSessionFromPolicy(
 ): Promise<{ success: boolean; session?: SessionInfo; policy_id?: string; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/policies/${policyId}/create-session`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/policies/${policyId}/create-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -838,7 +838,7 @@ export async function sessionRequest(
 ): Promise<{ success: boolean; session?: SessionInfo; receipt?: { request_hash: string; amount: number; timestamp: string }; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/request`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount, request_hash: requestHash }),
@@ -864,7 +864,7 @@ export async function settleSession(
 ): Promise<{ success: boolean; session?: SessionInfo; settlement?: { amount: number; settled_at: string }; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/settle`, {
+    const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/settle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ settlement_amount: settlementAmount, agent }),
@@ -890,7 +890,7 @@ export async function resolveDispute(
 ): Promise<{ success: boolean; dispute?: DisputeInfo; settlement?: { agent_amount: number; client_amount: number }; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/disputes/${jobHash}/resolve`, {
+    const response = await fetchWithRetry(`${API_BASE}/disputes/${jobHash}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_percentage: agentPercentage, admin_address: adminAddress }),
@@ -958,7 +958,7 @@ export async function verifyEscrowProof(
 ): Promise<{ valid: boolean; error?: string; verified_at?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/verify/escrow`, {
+    const response = await fetchWithRetry(`${API_BASE}/verify/escrow`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proof }),
@@ -977,7 +977,7 @@ export async function verifyNullifier(
 
 
   try {
-    const response = await fetch(`${API_BASE}/verify/nullifier`, {
+    const response = await fetchWithRetry(`${API_BASE}/verify/nullifier`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nullifier }),
@@ -1054,7 +1054,7 @@ export async function createJob(data: {
 }): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/jobs`, {
+    const response = await fetchWithRetry(`${API_BASE}/jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1127,7 +1127,7 @@ export async function updateJobStatus(
 ): Promise<{ success: boolean; job?: JobInfo; error?: string }> {
 
   try {
-    const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/jobs/${jobId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),

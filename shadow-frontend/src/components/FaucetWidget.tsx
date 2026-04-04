@@ -6,9 +6,10 @@ import { ExternalLink, Copy, Check, Loader2, Wallet } from 'lucide-react';
 import { useShieldWallet } from '../providers/WalletProvider';
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { useToast } from '../contexts/ToastContext';
+import { ALEO_RPC_TESTNET_URL } from '../services/aleo';
 
 const FAUCET_URL = 'https://faucet.aleo.org/';
-const RPC_URL = 'https://api.explorer.provable.com/v1/testnet';
+const RPC_URL = ALEO_RPC_TESTNET_URL;
 
 interface FaucetWidgetProps {
   /** 'inline' for dashboard cards, 'compact' for header popover */

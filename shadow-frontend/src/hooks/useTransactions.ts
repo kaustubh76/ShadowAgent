@@ -126,6 +126,9 @@ export function useRatingTransaction() {
     try {
       // Use SDK client for rating submission
       const client = getClient();
+      if (!client) {
+        return { success: false, error: 'SDK client not ready. Please wait and try again.' };
+      }
       const result = await client.submitRating(agentAddress, jobHash, rating, paymentAmount);
 
       if (result.success) {

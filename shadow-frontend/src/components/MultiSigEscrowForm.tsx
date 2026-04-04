@@ -30,13 +30,18 @@ export default function MultiSigEscrowForm({
   const nonEmptySigners = signers.filter(s => s.trim());
   const hasDuplicates = new Set(nonEmptySigners).size !== nonEmptySigners.length;
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleSubmit = async () => {
     if (validSigners.length < requiredSigs || hasDuplicates) return;
 
+    setError(null);
     setIsSubmitting(true);
     try {
       await onSubmit(signers as [string, string, string], requiredSigs);
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create multi-sig escrow');
     } finally {
       setIsSubmitting(false);
     }
@@ -132,6 +137,13 @@ export default function MultiSigEscrowForm({
             </span>
           </div>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4 text-sm text-red-400">
+            {error}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex gap-3">

@@ -42,7 +42,7 @@ export default function ActiveSessionsPanel({ agentAddress }: { agentAddress: st
     const result = await closeSession(sessionId, agentAddress);
     if (result.success) {
       updateSession(sessionId, { status: 'closed' });
-      addTransaction({ type: 'session_closed', agentId: agentAddress, amount: result.refund_amount });
+      addTransaction({ type: 'session_closed', agentId: agentAddress, amount: result.refund_amount || 0 });
       toast.success('Session closed');
     } else {
       toast.error(result.error || 'Failed to close session');

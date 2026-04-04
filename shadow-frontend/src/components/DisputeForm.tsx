@@ -20,9 +20,11 @@ export default function DisputeForm({
 }: DisputeFormProps) {
   const [evidenceDescription, setEvidenceDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!evidenceDescription.trim()) return;
+    setError(null);
     setIsSubmitting(true);
     try {
       // Hash the evidence description (in production, this would hash uploaded files)
@@ -34,6 +36,8 @@ export default function DisputeForm({
 
       await onSubmit(evidenceHash);
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit dispute');
     } finally {
       setIsSubmitting(false);
     }
@@ -101,6 +105,13 @@ export default function DisputeForm({
             This will be hashed and stored on-chain as evidence.
           </p>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4 text-sm text-red-400">
+            {error}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex gap-3">

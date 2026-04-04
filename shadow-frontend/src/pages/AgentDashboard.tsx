@@ -135,8 +135,8 @@ export default function AgentDashboard() {
       listSessions({ agent: publicKey }).then(setSessions).catch(err => console.warn('Failed to load sessions:', err.message));
       fetchJobs({ agent: publicKey }).then(setJobs).catch(err => console.warn('Failed to load jobs:', err.message));
       const interval = setInterval(() => {
-        listSessions({ agent: publicKey }).then(setSessions).catch(() => {});
-        fetchJobs({ agent: publicKey }).then(setJobs).catch(() => {});
+        listSessions({ agent: publicKey }).then(setSessions).catch(err => console.debug('[AgentDashboard] session refresh failed:', err));
+        fetchJobs({ agent: publicKey }).then(setJobs).catch(err => console.debug('[AgentDashboard] jobs refresh failed:', err));
       }, 60_000);
       return () => clearInterval(interval);
     }
@@ -182,11 +182,11 @@ export default function AgentDashboard() {
       setReputation(null);
 
       if (FACILITATOR_ENABLED) {
-        fetch(`${API_BASE}/agents/unregister`, {
+        fetchWithRetry(`${API_BASE}/agents/unregister`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: publicKey, tx_id: txId }),
-        }).catch(() => {});
+        }).catch(err => console.warn('[AgentDashboard] facilitator unregister notification failed:', err));
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unregistration failed';

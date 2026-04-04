@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL,
   MAX_POLL_ATTEMPTS,
 } from '../../constants/ui';
+import { ALEO_RPC_TESTNET_URL } from '../../services/aleo';
 import {
   SHADOW_AGENT_PROGRAM_ID,
   REGISTRATION_BOND,
@@ -137,7 +138,7 @@ export default function RegistrationForm({ onRegistered }: RegistrationFormProps
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
         try {
           const response = await fetch(
-            `https://api.explorer.provable.com/v1/testnet/transaction/${txId}`
+            `${ALEO_RPC_TESTNET_URL}/transaction/${txId}`
           );
           if (response.ok) {
             const txData = await response.json();
@@ -168,7 +169,7 @@ export default function RegistrationForm({ onRegistered }: RegistrationFormProps
               bond_amount: bondAmount,
               tx_id: txId,
             }),
-          }).catch(() => {});
+          }).catch(err => console.warn('[RegistrationForm] facilitator notification failed:', err));
         }
 
         onRegistered();
