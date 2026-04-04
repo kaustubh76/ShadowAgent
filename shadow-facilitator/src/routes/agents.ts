@@ -9,6 +9,17 @@ import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress } from '../utils/validation';
 
+// Lazy logger — avoids circular dependency with index.ts
+function logError(context: string, error: unknown) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { logger } = require('../index');
+    logger.error(`${context}:`, error);
+  } catch {
+    console.error(`${context}:`, error);
+  }
+}
+
 const router = Router();
 
 // Per-address rate limiters (Fixed Window Counter)
@@ -55,7 +66,7 @@ router.get('/', async (req: Request, res: Response) => {
       offset: params.offset,
     });
   } catch (error) {
-    console.error('[agents] Failed to search agents:', error);
+    logError('[agents] Failed to search agents', error);
     res.status(500).json({ error: 'Failed to search agents' });
   }
 });
@@ -191,7 +202,7 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
       on_chain_verified: onChainVerified,
     });
   } catch (error) {
-    console.error('[agents] Failed to register agent:', error);
+    logError('[agents] Failed to register agent', error);
     res.status(500).json({ error: 'Failed to register agent' });
   }
 });
@@ -216,7 +227,7 @@ router.post('/unregister', async (req: Request, res: Response) => {
 
     res.json({ success: true, agent_id: id });
   } catch (error) {
-    console.error('[agents] Failed to unregister agent:', error);
+    logError('[agents] Failed to unregister agent', error);
     res.status(500).json({ error: 'Failed to unregister agent' });
   }
 });
@@ -261,7 +272,7 @@ router.get('/by-address/:publicKey', async (req: Request, res: Response) => {
       total_revenue: ratings.reduce((sum: number, r: RatingRecord) => sum + r.payment_amount, 0),
     });
   } catch (error) {
-    console.error('[agents] Failed to look up agent by address:', error);
+    logError('[agents] Failed to look up agent by address', error);
     res.status(500).json({ error: 'Failed to look up agent by address' });
   }
 });
@@ -319,10 +330,12 @@ router.post('/:agentId/rating', ratingLimiter, async (req: Request, res: Respons
         nullifierStore.set(nullifier, true);
       }
 
-      res.status(201).json({ success: true, rating: record });
+      // Exclude nullifier from response — it's a sensitive cryptographic commitment
+      const { nullifier: _nullifier, ...safeRecord } = record;
+      res.status(201).json({ success: true, rating: safeRecord });
     });
   } catch (error) {
-    console.error('[agents] Failed to submit rating:', error);
+    logError('[agents] Failed to submit rating', error);
     res.status(500).json({ error: 'Failed to submit rating' });
   }
 });
@@ -340,7 +353,7 @@ router.get('/:agentId', async (req: Request, res: Response) => {
 
     res.json(agent);
   } catch (error) {
-    console.error('[agents] Failed to get agent:', error);
+    logError('[agents] Failed to get agent', error);
     res.status(500).json({ error: 'Failed to get agent' });
   }
 });
@@ -402,7 +415,7 @@ router.get('/:agentId/proof', async (req: Request, res: Response) => {
         : 'Agent is New tier',
     });
   } catch (error) {
-    console.error('[agents] Failed to get proof:', error);
+    logError('[agents] Failed to get proof', error);
     res.status(500).json({ error: 'Failed to get proof' });
   }
 });

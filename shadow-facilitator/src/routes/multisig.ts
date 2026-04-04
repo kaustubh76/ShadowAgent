@@ -6,6 +6,10 @@ import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress, isPositiveNumber, isNonNegativeInteger, SAFE_LIMITS } from '../utils/validation';
 
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); } catch { console.error(`${ctx}:`, error); }
+}
+
 const router = Router();
 
 // Per-address rate limiting: 10 multisig operations per minute
@@ -163,7 +167,7 @@ router.post('/', multisigLimiter, async (req: Request, res: Response) => {
       escrow,
     });
   } catch (error) {
-    console.error('[multisig] Failed to create multi-sig escrow:', error);
+    logError('[multisig] Failed to create multi-sig escrow:', error);
     res.status(500).json({ error: 'Failed to create multi-sig escrow' });
   }
 });
@@ -198,7 +202,8 @@ router.get('/:jobHash', async (req: Request, res: Response) => {
 // POST /escrows/multisig/:jobHash/approve - Submit an approval
 router.post('/:jobHash/approve', multisigLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
-  const { signer_address, secret } = req.body;
+  // Note: `secret` is accepted for future HTLC support but not verified in current approval-count design
+  const { signer_address } = req.body;
 
   // Use per-job mutex to prevent race conditions on concurrent approvals
   await withJobLock(jobHash, async () => {
@@ -216,6 +221,11 @@ router.post('/:jobHash/approve', multisigLimiter, async (req: Request, res: Resp
 
     if (!signer_address) {
       res.status(400).json({ error: 'Missing required field: signer_address' });
+      return;
+    }
+
+    if (!isValidAleoAddress(signer_address)) {
+      res.status(400).json({ error: 'signer_address must be a valid Aleo address' });
       return;
     }
 

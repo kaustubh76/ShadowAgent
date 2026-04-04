@@ -5,6 +5,10 @@ import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress, isPositiveNumber, isPositiveInteger, SAFE_LIMITS } from '../utils/validation';
 
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); } catch { console.error(`${ctx}:`, error); }
+}
+
 const router = Router();
 
 // Approximate block duration on Aleo testnet (~6 seconds per block)
@@ -140,7 +144,7 @@ router.post('/policies', async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, policy });
   } catch (error) {
-    console.error('[sessions] Failed to create policy:', error);
+    logError('[sessions] Failed to create policy:', error);
     res.status(500).json({ error: 'Failed to create policy' });
   }
 });
@@ -240,7 +244,7 @@ router.post('/policies/:policyId/create-session', async (req: Request, res: Resp
       policy_id: policyId,
     });
   } catch (error) {
-    console.error('[sessions] Failed to create session from policy:', error);
+    logError('[sessions] Failed to create session from policy:', error);
     res.status(500).json({ error: 'Failed to create session from policy' });
   }
 });
@@ -334,7 +338,7 @@ router.post('/', async (req: Request, res: Response) => {
       session,
     });
   } catch (error) {
-    console.error('[sessions] Failed to create session:', error);
+    logError('[sessions] Failed to create session:', error);
     res.status(500).json({ error: 'Failed to create session' });
   }
 });
@@ -520,6 +524,8 @@ router.post('/:sessionId/settle', async (req: Request, res: Response) => {
       return;
     }
 
+    // Deduct settled amount to prevent double-settlement
+    session.spent -= settlement_amount;
     session.updated_at = new Date().toISOString();
 
     res.json({

@@ -5,6 +5,10 @@ import { createAddressRateLimiter } from '../middleware/rateLimiter';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress, isPositiveNumber, isPositiveInteger } from '../utils/validation';
 
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); } catch { console.error(`${ctx}:`, error); }
+}
+
 const router = Router();
 
 // Rate limiting: 10 job operations per minute per address
@@ -43,6 +47,33 @@ const jobStore = new TTLStore<JobRecord>({
   defaultTTLMs: JOB_TTL_MS,
 });
 
+// Per-job mutex to prevent TOCTOU race on concurrent status updates
+const jobLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
+
+setInterval(() => {
+  for (const [key, lock] of jobLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) jobLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
+
+async function withJobLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
+  if (!jobLocks.has(jobId)) {
+    jobLocks.set(jobId, { queue: [], active: false });
+  }
+  const lock = jobLocks.get(jobId)!;
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
+  try {
+    return await fn();
+  } finally {
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) next(); else jobLocks.delete(jobId);
+  }
+}
+
 // POST /jobs - Create a new job
 router.post('/', jobLimiter, async (req: Request, res: Response) => {
   try {
@@ -69,8 +100,8 @@ router.post('/', jobLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (!isPositiveInteger(service_type) || service_type < 1 || service_type > 7) {
-      res.status(400).json({ error: 'service_type must be an integer between 1 and 7' });
+    if (typeof service_type !== 'number' || !Number.isInteger(service_type) || service_type < 0 || service_type > 7) {
+      res.status(400).json({ error: 'service_type must be an integer between 0 and 7' });
       return;
     }
 
@@ -123,7 +154,7 @@ router.post('/', jobLimiter, async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, job });
   } catch (error) {
-    console.error('[jobs] Failed to create job:', error);
+    logError('[jobs] Failed to create job:', error);
     res.status(500).json({ error: 'Failed to create job' });
   }
 });
@@ -160,50 +191,53 @@ router.get('/:jobId', async (req: Request, res: Response) => {
 // PATCH /jobs/:jobId - Update job status
 router.patch('/:jobId', jobLimiter, async (req: Request, res: Response) => {
   const { jobId } = req.params;
-  const job = jobStore.get(jobId);
 
-  if (!job) {
-    res.status(404).json({ error: 'Job not found' });
-    return;
-  }
+  await withJobLock(jobId, async () => {
+    const job = jobStore.get(jobId);
 
-  const { status, escrow_status, caller } = req.body;
-
-  // Verify caller is either the job's client or agent
-  if (!caller || (caller !== job.client && caller !== job.agent)) {
-    res.status(403).json({ error: 'Caller must be the job client or agent' });
-    return;
-  }
-
-  const validStatusTransitions: Record<string, string[]> = {
-    'draft': ['open', 'cancelled'],
-    'open': ['in_progress', 'cancelled'],
-    'in_progress': ['completed', 'cancelled'],
-    'completed': [],
-    'cancelled': [],
-  };
-
-  if (status) {
-    const allowed = validStatusTransitions[job.status];
-    if (!allowed || !allowed.includes(status)) {
-      res.status(400).json({ error: `Cannot transition from ${job.status} to ${status}` });
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
       return;
     }
-    job.status = status;
-  }
 
-  if (escrow_status) {
-    const validEscrowStatuses = ['pending', 'locked', 'released', 'refunded'];
-    if (!validEscrowStatuses.includes(escrow_status)) {
-      res.status(400).json({ error: `Invalid escrow_status: ${escrow_status}` });
+    const { status, escrow_status, caller } = req.body;
+
+    // Verify caller is either the job's client or agent
+    if (!caller || (caller !== job.client && caller !== job.agent)) {
+      res.status(403).json({ error: 'Caller must be the job client or agent' });
       return;
     }
-    job.escrow_status = escrow_status;
-  }
 
-  job.updated_at = new Date().toISOString();
+    const validStatusTransitions: Record<string, string[]> = {
+      'draft': ['open', 'cancelled'],
+      'open': ['in_progress', 'cancelled'],
+      'in_progress': ['completed', 'cancelled'],
+      'completed': [],
+      'cancelled': [],
+    };
 
-  res.json({ success: true, job });
+    if (status) {
+      const allowed = validStatusTransitions[job.status];
+      if (!allowed || !allowed.includes(status)) {
+        res.status(400).json({ error: `Cannot transition from ${job.status} to ${status}` });
+        return;
+      }
+      job.status = status;
+    }
+
+    if (escrow_status) {
+      const validEscrowStatuses = ['pending', 'locked', 'released', 'refunded'];
+      if (!validEscrowStatuses.includes(escrow_status)) {
+        res.status(400).json({ error: `Invalid escrow_status: ${escrow_status}` });
+        return;
+      }
+      job.escrow_status = escrow_status;
+    }
+
+    job.updated_at = new Date().toISOString();
+
+    res.json({ success: true, job });
+  });
 });
 
 // Seed jobs directly into the store (called from index.ts on startup)

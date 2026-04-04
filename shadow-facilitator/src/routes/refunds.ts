@@ -6,6 +6,10 @@ import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress, isPositiveNumber } from '../utils/validation';
 
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); } catch { console.error(`${ctx}:`, error); }
+}
+
 const router = Router();
 
 // Per-address rate limiting: 5 refund proposals per hour
@@ -33,6 +37,33 @@ const refundStore = new TTLStore<RefundProposal>({
   maxSize: 50_000,
   defaultTTLMs: 30 * 86_400_000,
 });
+
+// Per-jobHash mutex to prevent TOCTOU race on concurrent refund creation
+const refundLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
+
+setInterval(() => {
+  for (const [key, lock] of refundLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) refundLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
+
+async function withRefundLock<T>(jobHash: string, fn: () => Promise<T>): Promise<T> {
+  if (!refundLocks.has(jobHash)) {
+    refundLocks.set(jobHash, { queue: [], active: false });
+  }
+  const lock = refundLocks.get(jobHash)!;
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
+  try {
+    return await fn();
+  } finally {
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) next(); else refundLocks.delete(jobHash);
+  }
+}
 
 // POST /refunds - Propose a partial refund
 router.post('/', refundLimiter, async (req: Request, res: Response) => {
@@ -69,31 +100,33 @@ router.post('/', refundLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (refundStore.has(job_hash)) {
-      res.status(409).json({ error: 'Refund proposal already exists for this job' });
-      return;
-    }
+    await withRefundLock(job_hash, async () => {
+      if (refundStore.has(job_hash)) {
+        res.status(409).json({ error: 'Refund proposal already exists for this job' });
+        return;
+      }
 
-    const proposal: RefundProposal = {
-      agent,
-      client: req.body.client || 'unknown',
-      total_amount,
-      agent_amount,
-      client_amount: total_amount - agent_amount,
-      job_hash,
-      status: 'proposed',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+      const proposal: RefundProposal = {
+        agent,
+        client: req.body.client || 'unknown',
+        total_amount,
+        agent_amount,
+        client_amount: total_amount - agent_amount,
+        job_hash,
+        status: 'proposed',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    refundStore.set(job_hash, proposal);
+      refundStore.set(job_hash, proposal);
 
-    res.status(201).json({
-      success: true,
-      proposal,
+      res.status(201).json({
+        success: true,
+        proposal,
+      });
     });
   } catch (error) {
-    console.error('[refunds] Failed to create refund proposal:', error);
+    logError('[refunds] Failed to create refund proposal:', error);
     res.status(500).json({ error: 'Failed to create refund proposal' });
   }
 });

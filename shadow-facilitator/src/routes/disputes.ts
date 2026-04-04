@@ -6,6 +6,10 @@ import { config } from '../config';
 import { TTLStore } from '../utils/ttlStore';
 import { isValidAleoAddress, isPositiveNumber } from '../utils/validation';
 
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); } catch { console.error(`${ctx}:`, error); }
+}
+
 const router = Router();
 
 // Per-address rate limiting: 3 disputes per hour
@@ -45,6 +49,33 @@ const disputeStore = new TTLStore<DisputeRecord>({
   defaultTTLMs: 90 * 86_400_000,
 });
 
+// Per-jobHash mutex to prevent TOCTOU race on concurrent dispute creation
+const disputeLocks = new Map<string, { queue: Array<() => void>; active: boolean }>();
+
+setInterval(() => {
+  for (const [key, lock] of disputeLocks.entries()) {
+    if (!lock.active && lock.queue.length === 0) disputeLocks.delete(key);
+  }
+}, 5 * 60_000).unref();
+
+async function withDisputeLock<T>(jobHash: string, fn: () => Promise<T>): Promise<T> {
+  if (!disputeLocks.has(jobHash)) {
+    disputeLocks.set(jobHash, { queue: [], active: false });
+  }
+  const lock = disputeLocks.get(jobHash)!;
+  if (lock.active) {
+    await new Promise<void>(resolve => lock.queue.push(resolve));
+  }
+  lock.active = true;
+  try {
+    return await fn();
+  } finally {
+    lock.active = false;
+    const next = lock.queue.shift();
+    if (next) next(); else disputeLocks.delete(jobHash);
+  }
+}
+
 // POST /disputes - Open a dispute
 router.post('/', disputeLimiter, async (req: Request, res: Response) => {
   try {
@@ -72,31 +103,33 @@ router.post('/', disputeLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (disputeStore.has(job_hash)) {
-      res.status(409).json({ error: 'Dispute already exists for this job' });
-      return;
-    }
+    await withDisputeLock(job_hash, async () => {
+      if (disputeStore.has(job_hash)) {
+        res.status(409).json({ error: 'Dispute already exists for this job' });
+        return;
+      }
 
-    const dispute: DisputeRecord = {
-      client: client || 'unknown',
-      agent,
-      job_hash,
-      escrow_amount,
-      client_evidence_hash: evidence_hash,
-      agent_evidence_hash: '',
-      status: 'opened',
-      resolution_agent_pct: 0,
-      opened_at: new Date().toISOString(),
-    };
+      const dispute: DisputeRecord = {
+        client: client || 'unknown',
+        agent,
+        job_hash,
+        escrow_amount,
+        client_evidence_hash: evidence_hash,
+        agent_evidence_hash: '',
+        status: 'opened',
+        resolution_agent_pct: 0,
+        opened_at: new Date().toISOString(),
+      };
 
-    disputeStore.set(job_hash, dispute);
+      disputeStore.set(job_hash, dispute);
 
-    res.status(201).json({
-      success: true,
-      dispute,
+      res.status(201).json({
+        success: true,
+        dispute,
+      });
     });
   } catch (error) {
-    console.error('[disputes] Failed to open dispute:', error);
+    logError('[disputes] Failed to open dispute:', error);
     res.status(500).json({ error: 'Failed to open dispute' });
   }
 });
@@ -141,35 +174,38 @@ router.get('/', async (req: Request, res: Response) => {
 router.post('/:jobHash/respond', disputeActionLimiter, async (req: Request, res: Response) => {
   const { jobHash } = req.params;
   const { evidence_hash, agent_id } = req.body;
-  const dispute = disputeStore.get(jobHash);
 
-  if (!dispute) {
-    res.status(404).json({ error: 'Dispute not found' });
-    return;
-  }
+  await withDisputeLock(jobHash, async () => {
+    const dispute = disputeStore.get(jobHash);
 
-  if (!agent_id || agent_id !== dispute.agent) {
-    res.status(403).json({ error: 'Only the dispute agent can respond' });
-    return;
-  }
+    if (!dispute) {
+      res.status(404).json({ error: 'Dispute not found' });
+      return;
+    }
 
-  if (dispute.status !== 'opened') {
-    res.status(400).json({ error: `Cannot respond to dispute in status: ${dispute.status}` });
-    return;
-  }
+    if (!agent_id || agent_id !== dispute.agent) {
+      res.status(403).json({ error: 'Only the dispute agent can respond' });
+      return;
+    }
 
-  if (!evidence_hash) {
-    res.status(400).json({ error: 'Missing required field: evidence_hash' });
-    return;
-  }
+    if (dispute.status !== 'opened') {
+      res.status(400).json({ error: `Cannot respond to dispute in status: ${dispute.status}` });
+      return;
+    }
 
-  dispute.agent_evidence_hash = evidence_hash;
-  dispute.status = 'agent_responded';
-  dispute.responded_at = new Date().toISOString();
+    if (!evidence_hash) {
+      res.status(400).json({ error: 'Missing required field: evidence_hash' });
+      return;
+    }
 
-  res.json({
-    success: true,
-    dispute,
+    dispute.agent_evidence_hash = evidence_hash;
+    dispute.status = 'agent_responded';
+    dispute.responded_at = new Date().toISOString();
+
+    res.json({
+      success: true,
+      dispute,
+    });
   });
 });
 
@@ -210,8 +246,8 @@ router.post('/:jobHash/resolve', disputeActionLimiter, async (req: Request, res:
     return;
   }
 
-  if (agent_percentage === undefined || agent_percentage < 0 || agent_percentage > 100) {
-    res.status(400).json({ error: 'agent_percentage must be between 0 and 100' });
+  if (agent_percentage === undefined || typeof agent_percentage !== 'number' || !Number.isFinite(agent_percentage) || agent_percentage < 0 || agent_percentage > 100) {
+    res.status(400).json({ error: 'agent_percentage must be a number between 0 and 100' });
     return;
   }
 
