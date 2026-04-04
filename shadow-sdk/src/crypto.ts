@@ -30,18 +30,20 @@ async function sha256Hex(input: string): Promise<string> {
   return bytesToHex(new Uint8Array(hash));
 }
 
-// Initialize thread pool for WASM operations
-let threadPoolInitialized = false;
+// Initialize thread pool for WASM operations (promise-based to prevent race conditions)
+let threadPoolPromise: Promise<void> | null = null;
 async function ensureThreadPool() {
-  if (!threadPoolInitialized) {
-    try {
-      const { initThreadPool } = await getSDK();
-      await initThreadPool();
-      threadPoolInitialized = true;
-    } catch (error) {
-      console.warn('Thread pool initialization failed, using single-threaded mode');
-    }
+  if (!threadPoolPromise) {
+    threadPoolPromise = (async () => {
+      try {
+        const { initThreadPool } = await getSDK();
+        await initThreadPool();
+      } catch (error) {
+        console.warn('Thread pool initialization failed, using single-threaded mode');
+      }
+    })();
   }
+  await threadPoolPromise;
 }
 
 /**
@@ -108,7 +110,12 @@ export function encodeBase64(data: string | object): string {
  * Decode base64 data
  */
 export function decodeBase64<T = string>(encoded: string): T {
-  const binary = atob(encoded);
+  let binary: string;
+  try {
+    binary = atob(encoded);
+  } catch {
+    throw new Error('Invalid base64 encoding');
+  }
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
@@ -443,11 +450,17 @@ export async function getBalance(address: string): Promise<number> {
  * Get current block height from Aleo testnet
  */
 export async function getBlockHeight(): Promise<number> {
-  const response = await fetch(`${TESTNET_API}/latest/height`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch block height: ${response.statusText}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${TESTNET_API}/latest/height`, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch block height: ${response.statusText}`);
+    }
+    return parseInt(await response.text(), 10);
+  } finally {
+    clearTimeout(timeout);
   }
-  return parseInt(await response.text(), 10);
 }
 
 /**
