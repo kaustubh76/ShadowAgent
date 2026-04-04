@@ -495,6 +495,105 @@ export class RedisService {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // GENERIC STORE OPERATIONS (for PersistentStore)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Store a JSON-serializable value under a namespaced key with optional TTL.
+   */
+  async setItem<T>(namespace: string, id: string, value: T, ttlSeconds?: number): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    try {
+      const k = this.key(namespace, id);
+      if (ttlSeconds && ttlSeconds > 0) {
+        await this.client!.set(k, JSON.stringify(value), 'EX', ttlSeconds);
+      } else {
+        await this.client!.set(k, JSON.stringify(value));
+      }
+      return true;
+    } catch (error) {
+      (getLogger() || console).error(`[redis] Failed to set ${namespace}:${id}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get a value by namespaced key.
+   */
+  async getItem<T>(namespace: string, id: string): Promise<T | null> {
+    if (!this.isConnected()) return null;
+    try {
+      const k = this.key(namespace, id);
+      const data = await this.client!.get(k);
+      return data ? JSON.parse(data) as T : null;
+    } catch (error) {
+      (getLogger() || console).error(`[redis] Failed to get ${namespace}:${id}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete a value by namespaced key.
+   */
+  async deleteItem(namespace: string, id: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    try {
+      const k = this.key(namespace, id);
+      await this.client!.del(k);
+      return true;
+    } catch (error) {
+      (getLogger() || console).error(`[redis] Failed to delete ${namespace}:${id}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a key exists.
+   */
+  async hasItem(namespace: string, id: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    try {
+      const k = this.key(namespace, id);
+      return (await this.client!.exists(k)) === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get all values in a namespace (scan-based for safety).
+   */
+  async getAllItems<T>(namespace: string): Promise<T[]> {
+    if (!this.isConnected()) return [];
+    try {
+      const pattern = this.key(namespace, '*');
+      const items: T[] = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.client!.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          const values = await this.client!.mget(...keys);
+          for (const v of values) {
+            if (v) items.push(JSON.parse(v) as T);
+          }
+        }
+      } while (cursor !== '0');
+      return items;
+    } catch (error) {
+      (getLogger() || console).error(`[redis] Failed to scan ${namespace}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if Redis is available for primary storage.
+   */
+  isAvailable(): boolean {
+    return this.isConnected();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // UTILITY
   // ═══════════════════════════════════════════════════════════════════
 

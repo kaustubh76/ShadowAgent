@@ -226,9 +226,15 @@ router.patch('/:jobId', jobLimiter, async (req: Request, res: Response) => {
     }
 
     if (escrow_status) {
-      const validEscrowStatuses = ['pending', 'locked', 'released', 'refunded'];
-      if (!validEscrowStatuses.includes(escrow_status)) {
-        res.status(400).json({ error: `Invalid escrow_status: ${escrow_status}` });
+      const validEscrowTransitions: Record<string, string[]> = {
+        'pending': ['locked'],
+        'locked': ['released', 'refunded'],
+        'released': [],
+        'refunded': [],
+      };
+      const allowed = validEscrowTransitions[job.escrow_status];
+      if (!allowed || !allowed.includes(escrow_status)) {
+        res.status(400).json({ error: `Cannot transition escrow from ${job.escrow_status} to ${escrow_status}` });
         return;
       }
       job.escrow_status = escrow_status;

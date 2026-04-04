@@ -262,6 +262,26 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
     }
   }
 
+  // Print startup readiness summary
+  const redisStatus = redis.isConnected() ? 'connected' : 'in-memory fallback';
+  const cachedCount = indexerService.getStats().cachedAgents;
+  const lines = [
+    '',
+    '  ┌─────────────────────────────────────────────┐',
+    '  │     ShadowAgent Facilitator Ready            │',
+    '  ├─────────────────────────────────────────────┤',
+    `  │  Server:      http://0.0.0.0:${PORT}             │`,
+    `  │  Environment: ${(process.env.NODE_ENV || 'development').padEnd(29)}│`,
+    `  │  Network:     ${(process.env.ALEO_NETWORK || 'testnet').padEnd(29)}│`,
+    `  │  Redis:       ${redisStatus.padEnd(29)}│`,
+    `  │  Agents:      ${String(cachedCount + ' cached').padEnd(29)}│`,
+    '  └─────────────────────────────────────────────┘',
+    '',
+  ];
+  for (const line of lines) {
+    logger.info(line);
+  }
+
 });
 
 // Register shutdown cleanup in dependency order (LIFO — last registered runs first)
