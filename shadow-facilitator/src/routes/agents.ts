@@ -193,7 +193,7 @@ router.post('/register', registrationLimiter, async (req: Request, res: Response
     });
 
     // Also attempt on-chain fetch in background (may enrich data if key matches)
-    indexerService.onAgentRegistered(agentId).catch(() => {});
+    indexerService.onAgentRegistered(agentId).catch(err => console.debug('[agents] Background indexer enrichment failed:', err));
 
     res.status(201).json({
       success: true,

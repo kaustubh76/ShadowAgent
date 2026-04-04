@@ -775,21 +775,25 @@ export default function AgentDetails() {
           isOpen={showRefundModal}
           onClose={() => { setShowRefundModal(false); setSelectedJob(null); }}
           onSubmit={async (agentAmount) => {
-            const walletAddr = useWalletStore.getState().address;
-            if (!walletAddr) { toast.error('Wallet not connected'); return; }
-            const result = await submitRefund({
-              agent: agent.agent_id,
-              client: walletAddr,
-              total_amount: selectedJob.escrow_amount,
-              agent_amount: agentAmount,
-              job_hash: selectedJob.job_hash,
-            });
-            if (result.success && result.proposal) {
-              toast.success('Partial refund proposed successfully');
-              useAgentStore.getState().addPartialRefund(result.proposal);
-              useAgentStore.getState().addTransaction({ type: 'partial_refund_proposed', agentId: agent.agent_id, amount: selectedJob.escrow_amount });
-            } else {
-              toast.error(result.error || 'Failed to propose refund');
+            try {
+              const walletAddr = useWalletStore.getState().address;
+              if (!walletAddr) { toast.error('Wallet not connected'); return; }
+              const result = await submitRefund({
+                agent: agent.agent_id,
+                client: walletAddr,
+                total_amount: selectedJob.escrow_amount,
+                agent_amount: agentAmount,
+                job_hash: selectedJob.job_hash,
+              });
+              if (result.success && result.proposal) {
+                toast.success('Partial refund proposed successfully');
+                useAgentStore.getState().addPartialRefund(result.proposal);
+                useAgentStore.getState().addTransaction({ type: 'partial_refund_proposed', agentId: agent.agent_id, amount: selectedJob.escrow_amount });
+              } else {
+                toast.error(result.error || 'Failed to propose refund');
+              }
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to propose refund');
             }
           }}
           agentAddress={agent.agent_id}
@@ -878,15 +882,19 @@ export default function AgentDetails() {
           isOpen={showRatingForm}
           onClose={() => setShowRatingForm(false)}
           onSubmit={async (rating, jobHash) => {
-            const result = await submitRating(agent.agent_id, {
-              job_hash: jobHash,
-              rating,
-            });
-            if (result.success) {
-              toast.success('Rating submitted successfully');
-              useAgentStore.getState().addTransaction({ type: 'rating_submitted', agentId: agent.agent_id });
-            } else {
-              toast.error(result.error || 'Failed to submit rating');
+            try {
+              const result = await submitRating(agent.agent_id, {
+                job_hash: jobHash,
+                rating,
+              });
+              if (result.success) {
+                toast.success('Rating submitted successfully');
+                useAgentStore.getState().addTransaction({ type: 'rating_submitted', agentId: agent.agent_id });
+              } else {
+                toast.error(result.error || 'Failed to submit rating');
+              }
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to submit rating');
             }
           }}
           agentAddress={agent.agent_id}

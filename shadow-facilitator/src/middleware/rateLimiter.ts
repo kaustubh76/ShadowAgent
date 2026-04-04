@@ -338,7 +338,7 @@ export class RedisBackedFixedWindowLimiter implements RateLimiter {
   reset(key: string): void {
     this.fallback.reset(key);
     if (this.redis?.isAvailable()) {
-      this.redis.reset(this.category, key).catch(() => {});
+      this.redis.reset(this.category, key).catch(err => console.debug('[rateLimiter] Redis reset failed:', err));
     }
   }
 
