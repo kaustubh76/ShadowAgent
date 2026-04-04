@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useLocation, Link } from 'react-router-dom';
 import { ArrowLeft, Copy, Check, Shield, Zap, X, Loader2, AlertCircle, FileCheck, Lock, Eye, Fingerprint, ShieldCheck, AlertTriangle, SplitSquareHorizontal, Users, Star } from 'lucide-react';
 import { AgentListing, getServiceTypeName, getTierName } from '../stores/agentStore';
 import { getAgent, verifyReputationProof, submitDispute, submitRefund, createMultiSigEscrow, approveMultiSigEscrow, submitRating, fetchJobs } from '../lib/api';
@@ -345,6 +345,7 @@ function RequestServiceModal({
 
 export default function AgentDetails() {
   const { agentId } = useParams<{ agentId: string }>();
+  const location = useLocation();
   const { connected } = useWalletStore();
   const { copied, copy } = useCopyToClipboard();
   const [agent, setAgent] = useState<AgentListing | null>(null);
@@ -402,6 +403,25 @@ export default function AgentDetails() {
       })
       .catch(() => setUserJobs([]));
   }, [address, agentId]);
+
+  // Auto-open modals when navigated from JobMarketplace or ClientDashboard
+  useEffect(() => {
+    const state = location.state as { job?: JobInfo; rateJob?: JobInfo } | null;
+    if (!state || !agent) return;
+
+    if (state.job) {
+      // Incoming from JobMarketplace — open request modal with job context
+      setInitialAmount(String(state.job.pricing / 1_000_000));
+      setShowRequestModal(true);
+    } else if (state.rateJob) {
+      // Incoming from ClientDashboard — open rating form with job pre-selected
+      setSelectedJob(state.rateJob);
+      setShowRatingForm(true);
+    }
+
+    // Clear route state so refreshing doesn't re-trigger
+    window.history.replaceState({}, '');
+  }, [agent, location.state]);
 
   // Derived: jobs eligible for dispute/refund vs rating
   const disputeableJobs = userJobs.filter(

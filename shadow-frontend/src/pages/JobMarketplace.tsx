@@ -288,7 +288,7 @@ export default function JobMarketplace() {
                 onToggle={() => setExpandedId(expandedId === job.job_id ? null : job.job_id)}
                 isOwnJob={address === job.client}
                 canAccept={connected && address !== job.agent && job.status === 'open'}
-                onAccept={() => navigate(`/agents/${job.agent}`)}
+                onAccept={() => navigate(`/agents/${job.agent}`, { state: { job } })}
                 delay={index * ANIMATION_DELAY_BASE}
               />
             ))}

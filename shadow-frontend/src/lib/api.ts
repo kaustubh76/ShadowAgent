@@ -641,7 +641,7 @@ export async function closeSession(
     const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/close`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client: caller, agent: caller }),
+      body: JSON.stringify({ client: caller }),
     });
 
     const body = await response.json();
@@ -666,7 +666,7 @@ export async function pauseSession(
     const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/pause`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client: caller, agent: caller }),
+      body: JSON.stringify({ client: caller }),
     });
 
     const body = await response.json();
@@ -691,7 +691,7 @@ export async function resumeSession(
     const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client: caller, agent: caller }),
+      body: JSON.stringify({ client: caller }),
     });
 
     const body = await response.json();

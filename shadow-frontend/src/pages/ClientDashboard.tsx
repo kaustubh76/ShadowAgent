@@ -123,7 +123,10 @@ export default function ClientDashboard() {
       const result = await searchAgents(filters);
       setSearchResults(result.agents);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to search agents');
+      const msg = err instanceof Error ? err.message : 'Failed to search agents';
+      setError(msg.includes('fetch') || msg.includes('network') || msg.includes('ECONNREFUSED')
+        ? 'Could not reach the facilitator. Check that the server is running and try again.'
+        : msg);
     } finally {
       setSearching(false);
     }
@@ -146,7 +149,10 @@ export default function ClientDashboard() {
         setMyJobs(jobs);
         setJobsLoading(false);
       }).catch((err) => {
-        setJobsError(err instanceof Error ? err.message : 'Failed to load jobs');
+        const msg = err instanceof Error ? err.message : 'Failed to load jobs';
+        setJobsError(msg.includes('fetch') || msg.includes('network') || msg.includes('ECONNREFUSED')
+          ? 'Could not load jobs. The facilitator may be offline — try refreshing.'
+          : msg);
         setJobsLoading(false);
       });
     };
@@ -535,20 +541,31 @@ export default function ClientDashboard() {
                         </div>
 
                         {/* Agent & Date */}
-                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>
-                            Agent:{' '}
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <div className="flex items-center gap-4">
+                            <span>
+                              Agent:{' '}
+                              <Link
+                                to={`/agents/${job.agent}`}
+                                className="text-gray-400 hover:text-shadow-300 transition-colors font-mono"
+                              >
+                                {job.agent.slice(0, 12)}...
+                              </Link>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(job.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {job.status === 'completed' && (
                             <Link
                               to={`/agents/${job.agent}`}
-                              className="text-gray-400 hover:text-shadow-300 transition-colors font-mono"
+                              state={{ rateJob: job }}
+                              className="px-3 py-1 rounded-lg bg-shadow-500/10 text-shadow-400 hover:bg-shadow-500/20 hover:text-shadow-300 transition-all font-medium"
                             >
-                              {job.agent.slice(0, 12)}...
+                              Rate Agent
                             </Link>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(job.created_at).toLocaleDateString()}
-                          </span>
+                          )}
                         </div>
                       </div>
                     );
