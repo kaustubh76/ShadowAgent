@@ -8,10 +8,12 @@ This guide covers comprehensive testing strategies for all ShadowAgent component
 
 | Component | Tests | Key Test Files |
 |-----------|-------|---------------|
-| **SDK** | 168 | `client.test.ts`, `agent.test.ts`, `crypto.test.ts`, `decay.test.ts`, `decay-cross-verify.test.ts` |
-| **Facilitator** | 342 | `agents.test.ts`, `sessions.test.ts`, `disputes.test.ts`, `refunds.test.ts`, `multisig.test.ts`, `rateLimiter.test.ts`, `x402.test.ts`, `integration.test.ts`, `ttlStore.test.ts`, `resilience.test.ts`, `shutdown.test.ts`, `consistentHash.test.ts`, `health.test.ts`, `verify.test.ts`, `aleo.test.ts`, `indexer.test.ts` |
-| **Frontend** | Partial | Component tests (`AgentCard`, `RatingForm`, `TierBadge`), Store tests (`agentStore`, `sdkStore`, `walletStore`), API tests (`api.test.ts`) |
-| **Total** | 510+ | All passing |
+| **SDK** | 68 unit + 49 integration | `crypto.test.ts`, `decay.test.ts`, `decay-cross-verify.test.ts`, `testnet.test.ts` |
+| **Facilitator** | 106 unit + 236 integration | `rateLimiter.test.ts`, `ttlStore.test.ts`, `resilience.test.ts`, `shutdown.test.ts`, `consistentHash.test.ts`, `testnet.test.ts` |
+| **Frontend** | 80 unit + 12 integration | `agentStore.test.ts`, `walletStore.test.ts`, `AgentCard.test.tsx`, `RatingForm.test.tsx`, `TierBadge.test.tsx`, `api-integration.test.ts` |
+| **Total** | **254 unit** (all passing) + 297 integration (require running services) |
+
+> **Note:** Integration tests (`testnet.test.ts`, `api-integration.test.ts`) require a running facilitator server and/or Aleo testnet access. Unit tests run offline with mocks and pass in all environments.
 
 ### SDK Test Environment Setup
 

@@ -1876,4 +1876,91 @@ npm publish --access public
 
 ---
 
+## 12. Implementation Changes (Post-Documentation Updates)
+
+> This section documents all changes made to the SDK during implementation that differ from the original specification above. Updated April 2026.
+
+### 12.1 Return Type Standardization
+
+All public Client and Agent methods now return a consistent result object instead of throwing errors:
+
+```typescript
+Promise<{ success: boolean; txId?: string; error?: string }>
+```
+
+This replaces the previously documented patterns of `Promise<void>`, `Promise<Type>`, or thrown `Error` exceptions. Callers should check `result.success` instead of wrapping in try-catch.
+
+### 12.2 Number Types (bigint → number)
+
+All public API methods use `number` for amounts (microcredits) instead of `bigint`. This simplifies JSON serialization and facilitator API communication. On-chain operations convert to Leo integer types internally.
+
+### 12.3 Client Method Signature Changes
+
+| Method | Change |
+|--------|--------|
+| `settleSession(sessionId, settlementAmount, agentAddress?)` | Added required `settlementAmount` and optional `agentAddress` params |
+| `createEscrow(paymentTerms, jobHash)` | Now takes `PaymentTerms` object instead of individual params |
+| `submitRating(agentAddress, jobHash, rating, paymentAmount)` | Flattened from object params; validates address format |
+| `pauseSession(sessionId)` / `resumeSession(sessionId)` | Takes `sessionId` string instead of full session object |
+| `sessionRequest(sessionId, amount, requestHash)` | Validates `sessionId` non-empty and `amount > 0` |
+
+### 12.4 Input Validation Added
+
+All public methods now validate inputs before making network calls:
+
+- **Address validation**: `aleo1` prefix + minimum length check on all Aleo address parameters
+- **Amount validation**: Positive number checks on `price`, `escrowAmount`, `totalAmount`, `settlementAmount`, `maxSessionValue`, `maxSingleRequest`
+- **String validation**: Non-empty checks on `sessionId`, `jobHash`, `evidenceHash`
+- **Range validation**: `rating` must be 1–5, `serviceType` must be 0–7, `required_signatures` must be 1–3
+- **Balance checks**: `createEscrow()` and `submitRating()` verify sufficient balance before attempting on-chain execution
+
+### 12.5 On-Chain → Facilitator Fallback Pattern
+
+All on-chain methods follow this pattern (not previously documented):
+
+```typescript
+try {
+  // 1. Attempt on-chain execution via @provablehq/sdk
+  const txId = await executeProgram(privateKey, program, fn, inputs);
+  return { success: true, txId };
+} catch (onChainError) {
+  // 2. Fallback to facilitator HTTP endpoint
+  const res = await this.fetchWithTimeout(`${facilitatorUrl}/endpoint`, { ... });
+  return { success: true, txId: res.tx_id };
+}
+```
+
+### 12.6 Agent Method Validation Added
+
+| Method | Validation Added |
+|--------|-----------------|
+| `updateListing(serviceType?, endpointUrl?, isActive?)` | `serviceType` must be 0–7 if provided |
+| `acceptPartialRefund(jobHash)` | `jobHash` required (non-empty) |
+| `rejectPartialRefund(jobHash)` | `jobHash` required (non-empty) |
+| `respondToDispute(jobHash, evidenceHash)` | Both params required (non-empty) |
+| `approveMultiSigEscrow(jobHash, secret)` | `jobHash` required (non-empty) |
+| `proveReputationWithDecay(proofType, threshold)` | `privateKey` required check added |
+
+### 12.7 Crypto Module Changes
+
+- `decodeBase64()`: Now wraps `atob()` in try-catch — throws `'Invalid base64 encoding'` instead of crashing
+- `getBlockHeight()`: Added 15-second `AbortController` timeout to prevent indefinite hangs
+- `ensureThreadPool()`: Changed from boolean flag to Promise-based initialization to prevent race conditions on concurrent calls
+- `createEscrow()` validates `paymentTerms.price > 0` and `paymentTerms.address` is valid Aleo format
+
+### 12.8 New Exports (index.ts)
+
+Added to public API surface:
+- `SHADOW_AGENT_PROGRAM` — Main program ID constant
+- `SHADOW_AGENT_SESSION_PROGRAM` — Session program ID constant
+- `getTransactionRecordOutputs` — Extract records from transaction data
+- `ALEO_RPC_TESTNET_URL` — Testnet-specific RPC URL (computed from `ALEO_RPC_URL`)
+
+### 12.9 Removed Methods
+
+- `refundEscrow()` — Documented in original spec but not implemented; refund flow uses `proposePartialRefund()` instead
+- `useRatingTransaction` hook (frontend) — Removed; rating uses direct API call pattern
+
+---
+
 *End of SDK Implementation Guide*

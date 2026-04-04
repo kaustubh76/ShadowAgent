@@ -862,4 +862,24 @@ Phase 10a implements four feature groups as a companion contract (`shadow_agent_
 
 ---
 
+## Implementation Hardening Summary (April 2026)
+
+69 implementation fixes applied across 10 rounds of hardening:
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| Input validation | 19 | Address format, amount positivity, sessionId non-empty, serviceType range |
+| Race condition protection | 6 | TOCTOU mutex locks on all 6 route files |
+| Error handling / UX | 12 | Form error states, try-catch wrappers, toast feedback |
+| Security | 6 | Nullifier stripped from responses, double-settle prevention, NaN bypass blocked, config validation |
+| Consistency | 10 | RPC URL centralization, fetchWithRetry, centralized logging, response shapes |
+| Bug fixes | 5 | rpcUrl regression, settleSession semantic, null pointer, thread pool race, base64 crash |
+| Workflow wiring | 4 | Job accept → agent details context, rate button on completed jobs, route state auto-open |
+| Resilience | 3 | Fetch timeouts, retry with backoff, abort controllers |
+| Dead code cleanup | 4 | Unused hooks, constants, silent catches |
+
+**Test results:** 254 unit tests passing (68 SDK + 106 facilitator + 80 frontend). Zero TypeScript errors. Zero build errors.
+
+---
+
 *End of 10-Phase Master Plan*

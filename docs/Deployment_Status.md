@@ -136,3 +136,13 @@
 | Explorer | `https://explorer.aleo.org` |
 
 > **Note:** The `@provablehq/sdk` internally appends the network path (e.g., `/testnet`) to the base RPC URL when making API calls. Application code should use the base URL as shown above.
+
+## Off-Chain Services Status
+
+| Service | Status | Tests |
+|---------|--------|-------|
+| **Facilitator** (Express.js) | Running on port 3001 | 106 unit tests passing |
+| **SDK** (TypeScript) | Published locally | 68 unit tests passing |
+| **Frontend** (React/Vite) | Dev server + production build | 80 unit tests passing |
+
+> Last verified: April 2026. All 254 unit tests passing. Zero TypeScript errors across all packages.

@@ -1350,4 +1350,95 @@ curl http://localhost:3001/sessions/{sessionId}
 
 ---
 
+## Implementation Changes (Post-Documentation Updates)
+
+> This section documents all changes made during implementation that differ from the original specification. Updated April 2026.
+
+### New Endpoints (Not in Original Spec)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/agents/by-address/:publicKey` | Look up agent by Aleo address; returns enriched data with `total_jobs`, `total_rating_points`, `total_revenue` |
+| GET | `/agents/:agentId/proof` | Verify agent tier proof with optional ZK proof & tx_id query params |
+| POST | `/verify/nullifier` | Check if a nullifier has been used (double-rating prevention) |
+| POST | `/jobs` | Create a new escrow-backed job listing |
+| GET | `/jobs` | List/filter jobs by agent, client, status |
+| GET | `/jobs/:jobId` | Get single job details |
+| PATCH | `/jobs/:jobId` | Update job status/escrow_status with state machine validation |
+| GET | `/health/detailed` | Detailed subsystem health: Aleo RPC circuit breaker, indexer stats, Redis, hash ring |
+
+### Validation Changes
+
+| Field | Original | Current |
+|-------|----------|---------|
+| `service_type` (agents) | Not specified | Must be integer 0–7 |
+| `service_type` (jobs) | 1–7 | Now 0–7 (consistent with agents) |
+| `agent_percentage` (dispute resolve) | 0–100 | Must be finite number 0–100 (NaN rejected) |
+| `escrow_status` (job update) | Any string | Must be one of: `pending`, `locked`, `released`, `refunded` |
+| `limit` (agent search) | No floor | Now `Math.max(1, Math.min(limit, 100))` |
+| `signer_address` (multisig approve) | Not validated | Must be valid Aleo address (`aleo1...`) |
+| Session amounts | No safe limits | Capped at `SAFE_LIMITS.MAX_TOTAL` and `SAFE_LIMITS.MAX_DURATION_BLOCKS` |
+
+### TOCTOU Race Condition Protection
+
+All state-mutating routes now use per-key mutex locks to prevent concurrent duplicate creation or modification:
+
+| Route File | Lock | Protects |
+|------------|------|----------|
+| `agents.ts` | `withRatingLock(nullifier)` | Duplicate rating prevention |
+| `disputes.ts` | `withDisputeLock(jobHash)` | Duplicate dispute creation + respond |
+| `refunds.ts` | `withRefundLock(jobHash)` | Duplicate refund proposal creation |
+| `sessions.ts` | `withSessionLock(sessionId)` | Concurrent session request/settle/close |
+| `multisig.ts` | `withJobLock(jobHash)` | Concurrent multi-sig approvals |
+| `jobs.ts` | `withJobLock(jobId)` | Concurrent job status updates |
+
+All lock maps have periodic cleanup (every 5 minutes, `.unref()`) to prevent memory leaks.
+
+### Centralized Logging
+
+All route files use a lazy `logError()` helper instead of `console.error`:
+
+```typescript
+function logError(ctx: string, error: unknown) {
+  try { require('../index').logger.error(`${ctx}:`, error); }
+  catch { console.error(`${ctx}:`, error); }
+}
+```
+
+This routes errors through the centralized winston logger while avoiding circular dependencies during tests.
+
+### Security Changes
+
+- **Nullifier stripped from rating response**: Rating submission no longer returns the `nullifier` field (sensitive cryptographic commitment)
+- **ADMIN_SECRET**: Dispute resolution supports optional `ADMIN_SECRET` env var for additional auth layer beyond address check
+- **Session double-settle protection**: `session.spent` is deducted after settlement — prevents claiming the same amount twice
+- **Session expiration enforcement**: Sessions with `valid_until` in the past are auto-closed when listed
+
+### Config Validation
+
+`validateConfig()` now checks that all rate limit values are positive and finite (catches `NaN` from invalid env vars):
+
+```typescript
+if (!Number.isFinite(value) || value <= 0) {
+  throw new Error(`Invalid rate limit config: ${name} must be a positive number`);
+}
+```
+
+### Seed Agent Validation
+
+`SEED_AGENTS` env var parsing now validates:
+- Address format (`aleo1...`, min 50 chars)
+- `service_type` range (0–7, finite integer)
+- `tier` range (0–4, finite integer)
+- Invalid entries are skipped with a warning log
+
+### Fire-and-Forget Error Logging
+
+All `.catch(() => {})` patterns have been replaced with error-logging catches:
+- `deletePendingJobData` in x402 middleware
+- `indexerService.onAgentRegistered` in agents route
+- `redis.reset` in rate limiter
+
+---
+
 *End of Facilitator Implementation Guide*

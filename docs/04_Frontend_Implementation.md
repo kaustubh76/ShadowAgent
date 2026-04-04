@@ -644,4 +644,97 @@ dist/assets/browser-*.js             194 kB  (gzip: 37 kB)
 
 ---
 
+## Implementation Changes (Post-Documentation Updates)
+
+> Updated April 2026.
+
+### New Pages
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/jobs` | `JobMarketplace.tsx` | Browse and accept escrow-backed job listings; "Accept" passes job context to AgentDetails via route state |
+| `/diagnostics` | `TestnetDiagnostics.tsx` | Testnet debugging utility: RPC health, block height, balance checks |
+
+### New Store Fields (agentStore.ts)
+
+```typescript
+// Phase 10a: Decay-aware reputation
+effectiveRating: number | null;
+decayPeriods: number;
+effectiveTier: Tier | null;
+
+// Phase 10a: Disputes & Refunds
+disputes: DisputeInfo[];
+partialRefunds: RefundInfo[];
+
+// Phase 5: Sessions & Policies
+sessions: SessionInfo[];
+activeSession: SessionInfo | null;
+policies: PolicyInfo[];
+activePolicy: PolicyInfo | null;
+
+// Multi-sig & Jobs
+pendingEscrows: MultiSigEscrowData[];
+jobs: JobInfo[];
+```
+
+### New API Functions (lib/api.ts)
+
+**Phase 5 — Sessions (8 functions):**
+`createSession`, `getSession`, `listSessions`, `closeSession`, `pauseSession`, `resumeSession`, `sessionRequest`, `settleSession`
+
+**Phase 5 — Policies (4 functions):**
+`createPolicy`, `listPolicies`, `getPolicy`, `createSessionFromPolicy`
+
+**Job Marketplace (4 functions):**
+`createJob`, `fetchJobs`, `getJob`, `updateJobStatus`
+
+**Utilities (5 functions):**
+`resolveDispute`, `getPendingEscrows`, `getHealthDetailed`, `getAgentByAddress`, `fetchWithRetry`
+
+All POST/PUT functions use `fetchWithRetry()` for automatic retry with backoff on 5xx errors.
+
+### Config Change
+
+```typescript
+// Was: export const FACILITATOR_ENABLED = !!import.meta.env.VITE_FACILITATOR_URL;
+// Now:
+export const FACILITATOR_ENABLED = true; // Facilitator is required for testnet operation
+```
+
+### RPC URL Centralization
+
+All hardcoded `https://api.explorer.provable.com/v1/testnet` URLs replaced with:
+```typescript
+import { ALEO_RPC_TESTNET_URL } from '../services/aleo';
+// ALEO_RPC_TESTNET_URL = `${ALEO_RPC_URL}/${ALEO_NETWORK}`
+```
+
+Applied in: `WalletProvider.tsx`, `ConnectWallet.tsx`, `FaucetWidget.tsx`, `RegistrationForm.tsx`
+
+### Route State Navigation
+
+- **JobMarketplace → AgentDetails**: "Accept Job" passes `{ state: { job } }` — auto-opens request modal with pre-filled pricing
+- **ClientDashboard → AgentDetails**: "Rate Agent" on completed jobs passes `{ state: { rateJob } }` — auto-opens rating form with job pre-selected
+- **AgentDetails**: Reads `useLocation().state` and auto-opens appropriate modal; clears state after mount
+
+### Form Error Handling
+
+All form components now show user-facing error messages on submission failure:
+- `DisputeForm.tsx` — red error banner with `error` state
+- `MultiSigEscrowForm.tsx` — red error banner with `error` state
+- `AgentDetails.tsx` refund/rating handlers — wrapped in try-catch with `toast.error()`
+
+### Hook Changes
+
+- **Removed**: `useRatingTransaction()` — dead code; rating uses direct API call via `submitRating()` from `api.ts`
+- **Added**: `useBlockHeight()` — utility hook for fetching current block height
+- **Fixed**: `useRatingTransaction` → `getClient()` null check (was causing runtime crash)
+
+### Unused Constants Removed
+
+- `RATING_BURN_AMOUNT = 0.5` removed from `constants/ui.ts` (duplicate of `RATING_BURN_COST` in `services/aleo.ts`)
+
+---
+
 *End of Frontend Implementation Guide*
