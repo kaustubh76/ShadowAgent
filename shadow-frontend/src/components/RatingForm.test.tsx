@@ -35,8 +35,10 @@ describe('RatingForm', () => {
   it('has star buttons, close, cancel and submit', () => {
     render(<RatingForm {...defaultProps} />);
     const buttons = screen.getAllByRole('button');
-    // 5 stars + close(X) + cancel + submit = 8
-    expect(buttons.length).toBe(8);
+    const stars = screen.getAllByRole('radio');
+    // 5 stars (role=radio) + close(X) + cancel + submit (role=button) = 3 buttons + 5 radios
+    expect(buttons.length).toBe(3);
+    expect(stars.length).toBe(5);
   });
 
   it('submit button is disabled when no rating selected', () => {
@@ -52,9 +54,7 @@ describe('RatingForm', () => {
 
     // Click the 4th star (buttons[3] = 4th star since close(X) is last in the header)
     // Stars are rendered first in the DOM order inside the rating section
-    const starButtons = screen.getAllByRole('button').filter(btn =>
-      btn.querySelector('svg.w-8')
-    );
+    const starButtons = screen.getAllByRole('radio');
     if (starButtons.length >= 4) {
       await user.click(starButtons[3]);
     }
@@ -68,9 +68,7 @@ describe('RatingForm', () => {
     render(<RatingForm {...defaultProps} />);
 
     // Click a star
-    const starButtons = screen.getAllByRole('button').filter(btn =>
-      btn.querySelector('svg.w-8')
-    );
+    const starButtons = screen.getAllByRole('radio');
     if (starButtons.length >= 4) {
       await user.click(starButtons[3]);
     }
@@ -89,9 +87,7 @@ describe('RatingForm', () => {
     render(<RatingForm {...defaultProps} onSubmit={onSubmit} />);
 
     // Click 4th star
-    const starButtons = screen.getAllByRole('button').filter(btn =>
-      btn.querySelector('svg.w-8')
-    );
+    const starButtons = screen.getAllByRole('radio');
     if (starButtons.length >= 4) {
       await user.click(starButtons[3]);
     }
@@ -121,9 +117,7 @@ describe('RatingForm', () => {
     render(<RatingForm {...defaultProps} />);
 
     // Click 3rd star
-    const starButtons = screen.getAllByRole('button').filter(btn =>
-      btn.querySelector('svg.w-8')
-    );
+    const starButtons = screen.getAllByRole('radio');
     if (starButtons.length >= 3) {
       await user.click(starButtons[2]);
     }

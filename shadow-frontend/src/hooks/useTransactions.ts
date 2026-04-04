@@ -3,9 +3,7 @@
 
 import { useState, useCallback } from 'react';
 import { useShieldWallet } from '../providers/WalletProvider';
-import { useSDKStore } from '../stores/sdkStore';
 import { useWalletStore } from '../stores/walletStore';
-import { RATING_BURN_COST } from '../services/aleo';
 
 // Transaction fee: 0.01 credits = 10,000 microcredits
 const TX_FEE = 10_000;
@@ -94,60 +92,6 @@ export function useEscrowTransaction() {
   }, [publicKey, signTransaction]);
 
   return { createEscrow, isLoading, status, setStatus };
-}
-
-/**
- * Hook for submitting ratings
- * Uses SDK client for rating submission with credit burn
- */
-export function useRatingTransaction() {
-  const { publicKey } = useShieldWallet();
-  const { getClient } = useSDKStore();
-  const [isLoading, setIsLoading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-
-  const submitRating = useCallback(async (
-    agentAddress: string,
-    rating: number, // 1-5 stars
-    jobHash: string,
-    paymentAmount: number = RATING_BURN_COST
-  ): Promise<TransactionResult> => {
-    if (!publicKey) {
-      return { success: false, error: 'Shield Wallet not connected' };
-    }
-
-    if (rating < 1 || rating > 5) {
-      return { success: false, error: 'Rating must be between 1 and 5 stars' };
-    }
-
-    setIsLoading(true);
-    setStatus('Submitting rating...');
-
-    try {
-      // Use SDK client for rating submission
-      const client = getClient();
-      if (!client) {
-        return { success: false, error: 'SDK client not ready. Please wait and try again.' };
-      }
-      const result = await client.submitRating(agentAddress, jobHash, rating, paymentAmount);
-
-      if (result.success) {
-        setStatus('Rating submitted!');
-        useWalletStore.getState().triggerBalanceRefresh();
-        return { success: true, txId: result.txId };
-      } else {
-        return { success: false, error: result.error };
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Rating submission failed';
-      setStatus(null);
-      return { success: false, error: message };
-    } finally {
-      setIsLoading(false);
-    }
-  }, [publicKey, getClient]);
-
-  return { submitRating, isLoading, status, setStatus };
 }
 
 /**

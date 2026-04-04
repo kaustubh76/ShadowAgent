@@ -80,14 +80,26 @@ export default function RatingForm({
         {/* Star Rating */}
         <div className="mb-6">
           <label className="text-sm text-gray-400 mb-3 block">Rating</label>
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex items-center justify-center gap-2" role="radiogroup" aria-label="Rating">
             {[1, 2, 3, 4, 5].map(star => (
               <button
                 key={star}
                 onClick={() => setSelectedRating(star)}
                 onMouseEnter={() => setHoveredRating(star)}
                 onMouseLeave={() => setHoveredRating(0)}
-                className="p-1 transition-transform hover:scale-110"
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedRating(Math.min(5, (selectedRating || 0) + 1));
+                  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedRating(Math.max(1, (selectedRating || 2) - 1));
+                  }
+                }}
+                role="radio"
+                aria-checked={selectedRating === star}
+                aria-label={`${star} star${star > 1 ? 's' : ''}`}
+                className="p-1 transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-yellow-400/50 rounded"
               >
                 <Star
                   className={`w-8 h-8 transition-colors ${
