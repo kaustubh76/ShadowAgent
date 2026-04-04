@@ -266,6 +266,14 @@ export class ShadowAgentClient {
 
     const paymentTerms = decodeBase64<PaymentTerms>(paymentHeader);
 
+    // Validate decoded payment terms
+    if (!paymentTerms || !paymentTerms.price || !paymentTerms.address) {
+      return {
+        success: false,
+        error: 'Invalid payment terms: missing price or address',
+      };
+    }
+
     // Check if we have a private key for payment
     if (!this.config.privateKey) {
       return {
@@ -321,6 +329,13 @@ export class ShadowAgentClient {
     paymentTerms: PaymentTerms,
     jobHash: string
   ): Promise<EscrowProof> {
+    if (!paymentTerms.price || paymentTerms.price <= 0) {
+      throw new Error('paymentTerms.price must be positive');
+    }
+    if (!isValidAleoAddress(paymentTerms.address)) {
+      throw new Error('paymentTerms.address must be a valid Aleo address');
+    }
+
     // Generate secret for HTLC
     const secret = generateSecret();
     const secretHash = await hashSecret(secret);
@@ -420,6 +435,10 @@ export class ShadowAgentClient {
     rating: number, // 1-5 stars
     paymentAmount: number
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!isValidAleoAddress(agentAddress)) {
+      return { success: false, error: 'Invalid agent address format' };
+    }
+
     // Validate rating
     if (rating < 1 || rating > 5) {
       return { success: false, error: 'Rating must be between 1 and 5 stars' };
@@ -626,6 +645,10 @@ export class ShadowAgentClient {
       return { success: false, error: 'Invalid agent address format' };
     }
 
+    if (totalAmount <= 0) {
+      return { success: false, error: 'Total amount must be positive' };
+    }
+
     if (agentAmount < 0) {
       return { success: false, error: 'Agent amount cannot be negative' };
     }
@@ -705,6 +728,10 @@ export class ShadowAgentClient {
       return { success: false, error: 'Invalid agent address format' };
     }
 
+    if (escrowAmount <= 0) {
+      return { success: false, error: 'Escrow amount must be positive' };
+    }
+
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to open a dispute' };
     }
@@ -724,7 +751,7 @@ export class ShadowAgentClient {
         const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/disputes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent, job_hash: jobHash, escrow_amount: escrowAmount, evidence_hash: evidenceHash }),
+          body: JSON.stringify({ agent, job_hash: jobHash, escrow_amount: escrowAmount, evidence_hash: evidenceHash, client: await this.getAddress() }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({})) as { error?: string };
@@ -944,6 +971,12 @@ export class ShadowAgentClient {
     amount: number,
     requestHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' };
+    }
+    if (!amount || amount <= 0) {
+      return { success: false, error: 'amount must be positive' };
+    }
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required for session request' };
     }
@@ -972,23 +1005,32 @@ export class ShadowAgentClient {
   }
 
   /**
-   * Settle accumulated payments from a session (called by the agent)
+   * Settle accumulated payments from a session.
+   * Must be called with the agent's address (the party who performed work).
    */
   async settleSession(
     sessionId: string,
-    settlementAmount: number
+    settlementAmount: number,
+    agentAddress?: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' };
+    }
+    if (!settlementAmount || settlementAmount <= 0) {
+      return { success: false, error: 'settlementAmount must be positive' };
+    }
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to settle session' };
     }
 
     try {
-      const clientAddress = await this.getAddress();
+      // Use explicit agentAddress if provided, otherwise derive from caller's key
+      const agent = agentAddress || await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/settle`;
       const response = await this.fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settlement_amount: settlementAmount, agent: clientAddress }),
+        body: JSON.stringify({ settlement_amount: settlementAmount, agent }),
       });
 
       if (!response.ok) {
@@ -1012,6 +1054,9 @@ export class ShadowAgentClient {
   async closeSession(
     sessionId: string
   ): Promise<{ success: boolean; refundAmount?: number; txId?: string; error?: string }> {
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' };
+    }
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to close session' };
     }
@@ -1046,6 +1091,9 @@ export class ShadowAgentClient {
   async pauseSession(
     sessionId: string
   ): Promise<{ success: boolean; error?: string }> {
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' };
+    }
     try {
       const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/pause`;
@@ -1075,6 +1123,9 @@ export class ShadowAgentClient {
   async resumeSession(
     sessionId: string
   ): Promise<{ success: boolean; error?: string }> {
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' };
+    }
     try {
       const clientAddress = await this.getAddress();
       const url = `${this.config.facilitatorUrl}/sessions/${sessionId}/resume`;
@@ -1138,6 +1189,10 @@ export class ShadowAgentClient {
   ): Promise<{ success: boolean; policyId?: string; txId?: string; error?: string }> {
     if (!this.config.privateKey) {
       return { success: false, error: 'Private key required to create a policy' };
+    }
+
+    if (maxSessionValue <= 0 || maxSingleRequest <= 0) {
+      return { success: false, error: 'maxSessionValue and maxSingleRequest must be positive' };
     }
 
     if (maxSingleRequest > maxSessionValue) {

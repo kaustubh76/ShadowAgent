@@ -671,6 +671,10 @@ export class ShadowAgentServer {
       return { success: false, error: 'Private key required for on-chain listing update' };
     }
 
+    if (newServiceType !== undefined && (newServiceType < 0 || newServiceType > 7)) {
+      return { success: false, error: 'serviceType must be 0-7' };
+    }
+
     const serviceType = newServiceType ?? this.config.serviceType;
     const active = isActive ?? true;
 
@@ -837,6 +841,9 @@ export class ShadowAgentServer {
   async acceptPartialRefund(
     jobHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!jobHash) {
+      return { success: false, error: 'jobHash is required' };
+    }
     try {
       const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/accept`;
       const response = await fetchWithTimeout(url, {
@@ -882,6 +889,9 @@ export class ShadowAgentServer {
   async rejectPartialRefund(
     jobHash: string
   ): Promise<{ success: boolean; error?: string }> {
+    if (!jobHash) {
+      return { success: false, error: 'jobHash is required' };
+    }
     try {
       const url = `${this.config.facilitatorUrl}/refunds/${jobHash}/reject`;
       const response = await fetchWithTimeout(url, {
@@ -915,6 +925,12 @@ export class ShadowAgentServer {
     jobHash: string,
     evidenceHash: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!jobHash) {
+      return { success: false, error: 'jobHash is required' };
+    }
+    if (!evidenceHash) {
+      return { success: false, error: 'evidenceHash is required' };
+    }
     try {
       const url = `${this.config.facilitatorUrl}/disputes/${jobHash}/respond`;
       const response = await fetchWithTimeout(url, {
@@ -1007,6 +1023,10 @@ export class ShadowAgentServer {
       return { success: false, error: 'No reputation data available' };
     }
 
+    if (!this.config.privateKey) {
+      return { success: false, error: 'Private key required for on-chain reputation proof' };
+    }
+
     try {
       const currentBlock = await getBlockHeight();
       const functionName = proofType === ProofType.Tier
@@ -1049,6 +1069,9 @@ export class ShadowAgentServer {
     jobHash: string,
     secret: string
   ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    if (!jobHash) {
+      return { success: false, error: 'jobHash is required' };
+    }
     try {
       const url = `${this.config.facilitatorUrl}/escrows/multisig/${jobHash}/approve`;
       const response = await fetchWithTimeout(url, {
