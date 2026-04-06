@@ -30,6 +30,7 @@ import {
   waitForTransaction,
   executeProgram,
   generateSessionId,
+  SHADOW_AGENT_PROGRAM,
   SHADOW_AGENT_EXT_PROGRAM,
   SHADOW_AGENT_SESSION_PROGRAM,
   getBlockHeight,
@@ -464,28 +465,37 @@ export class ShadowAgentClient {
       };
     }
 
-    // Execute real transfer as burn — Sybil resistance via proof-of-stake
+    // Attempt on-chain submit_rating transition (includes burn + nullifier check)
     try {
-      const txId = await transferPublic(
+      const jobHashField = `${BigInt('0x' + jobHash.slice(0, 62))}field`;
+      const txId = await executeProgram(
         this.config.privateKey,
-        agentAddress,
-        RATING_BURN_COST,
-        fee
+        SHADOW_AGENT_PROGRAM,
+        'submit_rating',
+        [
+          agentAddress,
+          jobHashField,
+          `${scaledRating}u8`,
+          `${paymentAmount}u64`,
+          `${RATING_BURN_COST}u64`,
+        ],
       );
-
-      // Wait for confirmation
-      const confirmation = await waitForTransaction(txId, 12, 5000);
-      if (!confirmation.confirmed) {
-        return { success: false, error: `Rating burn not confirmed: ${confirmation.error}` };
-      }
 
       // Notify facilitator for indexing (non-blocking)
       this.notifyFacilitatorOfRating(agentAddress, jobHash, scaledRating, paymentAmount, txId).catch((err) => console.debug('[ShadowAgentClient] facilitator rating notification failed:', err instanceof Error ? err.message : err));
 
       return { success: true, txId };
     } catch (onChainError) {
-      // Facilitator fallback
+      // Facilitator fallback — burn via transferPublic + notify
       try {
+        const burnTxId = await transferPublic(
+          this.config.privateKey,
+          agentAddress,
+          RATING_BURN_COST,
+          fee
+        );
+
+        // Notify facilitator for indexing
         const res = await this.fetchWithTimeout(`${this.config.facilitatorUrl}/agents/${agentAddress}/rating`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -493,6 +503,7 @@ export class ShadowAgentClient {
             job_hash: jobHash,
             rating: scaledRating,
             payment_amount: paymentAmount,
+            tx_id: burnTxId,
           }),
         });
         if (!res.ok) {
@@ -500,9 +511,9 @@ export class ShadowAgentClient {
           return { success: false, error: err.error || 'Facilitator fallback failed' };
         }
         const result = await res.json() as { tx_id?: string };
-        return { success: true, txId: result.tx_id };
+        return { success: true, txId: result.tx_id || burnTxId };
       } catch {
-        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'On-chain rating submission failed' };
+        return { success: false, error: onChainError instanceof Error ? onChainError.message : 'Rating submission failed' };
       }
     }
   }
