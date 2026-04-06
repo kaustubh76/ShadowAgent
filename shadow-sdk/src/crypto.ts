@@ -769,8 +769,9 @@ export async function getTransactionRecordOutputs(txId: string): Promise<string[
  * Wait for a transaction to be confirmed
  *
  * @param txId - Transaction ID to wait for
- * @param maxAttempts - Maximum polling attempts
- * @param delayMs - Delay between attempts in milliseconds
+ * @param maxAttempts - Maximum polling attempts (default 60 = 300s with 5s delay).
+ *   For Aleo testnet, use at least 30 attempts (150s) — transactions take 60-120s.
+ * @param delayMs - Delay between attempts in milliseconds (default 5000)
  * @returns Transaction status
  */
 export async function waitForTransaction(
