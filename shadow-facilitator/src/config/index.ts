@@ -1,6 +1,11 @@
 import dotenv from 'dotenv';
+import { existsSync } from 'fs';
 
+// Load .env first, then .env.production as fallback (for Render where .env is gitignored)
 dotenv.config();
+if (existsSync('.env.production')) {
+  dotenv.config({ path: '.env.production', override: false });
+}
 
 export const config = {
   env: process.env.NODE_ENV || 'development',

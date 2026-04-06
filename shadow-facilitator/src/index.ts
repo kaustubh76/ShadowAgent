@@ -270,7 +270,8 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
   }
 
   // Seed demo data (ratings, sessions, disputes, refunds, policies, multi-sig)
-  if (process.env.NODE_ENV !== 'production') {
+  // Always seed — in-memory stores are empty on every restart
+  if (process.env.SKIP_DEMO_SEED !== 'true') {
     try {
       const { seedDemoData } = await import('./seedData');
       await seedDemoData(Number(PORT));
