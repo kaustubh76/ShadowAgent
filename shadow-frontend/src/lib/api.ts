@@ -105,13 +105,16 @@ const _cache = new Map<string, { data: unknown; ts: number }>();
 const CACHE_TTL = 30_000; // 30 seconds
 const MAX_CACHE_SIZE = 200; // Cap to prevent unbounded memory growth
 
-// Periodically evict expired entries
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of _cache.entries()) {
-    if (now - entry.ts >= CACHE_TTL) _cache.delete(key);
-  }
-}, 60_000);
+// Periodically evict expired entries (guarded to prevent duplicates on HMR)
+if (!(globalThis as Record<string, unknown>).__shadowagent_cache_cleanup) {
+  (globalThis as Record<string, unknown>).__shadowagent_cache_cleanup = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of _cache.entries()) {
+      if (now - entry.ts >= CACHE_TTL) _cache.delete(key);
+    }
+  }, 60_000);
+}
 
 function getCached<T>(key: string): T | null {
   const entry = _cache.get(key);

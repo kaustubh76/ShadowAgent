@@ -24,6 +24,9 @@ interface SDKState {
   getClient: () => any;
 }
 
+// Promise guard prevents concurrent initializeClient() calls from double-importing WASM
+let initPromise: Promise<void> | null = null;
+
 export const useSDKStore = create<SDKState>((set, get) => ({
   client: null,
   isInitialized: false,
@@ -39,20 +42,32 @@ export const useSDKStore = create<SDKState>((set, get) => ({
       return;
     }
 
-    try {
-      // Lazy import to avoid blocking React mount with WASM loading
-      const { ShadowAgentClient } = await import('@shadowagent/sdk');
-      const client = new ShadowAgentClient({
-        network: 'testnet',
-        facilitatorUrl: API_BASE,
-        timeout: 30000,
-        ...config,
-      });
-      set({ client, isInitialized: true });
-    } catch (error) {
-      console.error('Failed to initialize SDK client:', error);
-      set({ isInitialized: false });
+    // If init is already in progress, wait for it instead of starting another
+    if (initPromise) {
+      await initPromise;
+      return;
     }
+
+    initPromise = (async () => {
+      try {
+        // Lazy import to avoid blocking React mount with WASM loading
+        const { ShadowAgentClient } = await import('@shadowagent/sdk');
+        const client = new ShadowAgentClient({
+          network: 'testnet',
+          facilitatorUrl: API_BASE,
+          timeout: 30000,
+          ...config,
+        });
+        set({ client, isInitialized: true });
+      } catch (error) {
+        console.error('Failed to initialize SDK client:', error);
+        set({ isInitialized: false });
+      } finally {
+        initPromise = null;
+      }
+    })();
+
+    await initPromise;
   },
 
   updateConfig: (updates) => {
