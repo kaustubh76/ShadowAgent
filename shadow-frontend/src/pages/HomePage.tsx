@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Shield, Lock, Zap, Users, ArrowRight, Github, FileText, Clock, Rocket, Globe, CheckCircle, Sparkles, TrendingUp, Eye, Activity } from 'lucide-react';
 import { ANIMATION_DELAY_BASE, ANIMATION_DELAY_STAGGER } from '../constants/ui';
-import { getHealthDetailed, type HealthDetailed } from '../lib/api';
+import { getHealthDetailed, searchAgents, fetchJobs, fetchDisputes, listSessions, type HealthDetailed } from '../lib/api';
 import { FACILITATOR_ENABLED } from '../config';
 
 const features = [
@@ -96,6 +96,59 @@ const roadmapPhases = [
     ],
   },
 ];
+
+function MarketplaceActivity() {
+  const [stats, setStats] = useState<{ agents: number; jobs: number; sessions: number; disputes: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!FACILITATOR_ENABLED) { setLoading(false); return; }
+
+    Promise.all([
+      searchAgents({}).then(r => r.agents.length).catch(() => 0),
+      fetchJobs({}).then(j => j.length).catch(() => 0),
+      listSessions({}).then(s => s.length).catch(() => 0),
+      fetchDisputes({}).then(d => d.length).catch(() => 0),
+    ]).then(([agents, jobs, sessions, disputes]) => {
+      setStats({ agents, jobs, sessions, disputes });
+      setLoading(false);
+    });
+  }, []);
+
+  if (!FACILITATOR_ENABLED || loading || !stats) return null;
+
+  const items = [
+    { label: 'Registered Agents', value: stats.agents, color: 'text-shadow-400' },
+    { label: 'Active Jobs', value: stats.jobs, color: 'text-blue-400' },
+    { label: 'Payment Sessions', value: stats.sessions, color: 'text-emerald-400' },
+    { label: 'Disputes Filed', value: stats.disputes, color: 'text-amber-400' },
+  ];
+
+  return (
+    <section>
+      <div className="card">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-lg bg-shadow-500/10 flex items-center justify-center">
+            <TrendingUp className="w-5 h-5 text-shadow-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-white">Live Marketplace</h2>
+            <p className="text-xs text-gray-500">Real-time activity on Aleo testnet</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {items.map(item => (
+            <div key={item.label} className="bg-white/[0.02] rounded-xl border border-white/[0.04] p-4 text-center">
+              <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+              <p className="text-xs text-gray-500 mt-1">{item.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function SystemStatus() {
   const [health, setHealth] = useState<HealthDetailed | null>(null);
@@ -402,6 +455,7 @@ export default function HomePage() {
       </section>
 
       {/* System Status */}
+      <MarketplaceActivity />
       <SystemStatus />
 
       {/* CTA */}

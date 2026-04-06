@@ -421,11 +421,11 @@ export default function TestnetDiagnostics() {
           { label: 'Amount', value: '10,000 microcredits (0.01 ALEO)' },
           { label: 'Recipient', value: 'Self (same address)' },
           { label: 'Transaction ID', value: txId },
-          { label: 'Status', value: 'Waiting for confirmation (up to 60s)...' },
+          { label: 'Status', value: 'Waiting for on-chain confirmation (up to ~3 min)...' },
         ],
       }));
 
-      const confirmation = await waitForTransaction(txId, 12, 5000);
+      const confirmation = await waitForTransaction(txId, 40, 5000);
 
       // Check new balance
       const newBalance = await getBalance(publicKey);
