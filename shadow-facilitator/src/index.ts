@@ -65,10 +65,16 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(helmet());
+// Helmet must allow cross-origin requests — disable conflicting policies
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginOpenerPolicy: false,
+}));
+
+// CORS — allow Vercel frontend + localhost dev
 const corsOriginEnv = process.env.CORS_ORIGIN;
 const corsOrigin = !corsOriginEnv || corsOriginEnv === '*'
-  ? '*'
+  ? true  // `true` reflects the request origin (like '*' but works with credentials)
   : corsOriginEnv.split(',').map(s => s.trim());
 app.use(cors({
   origin: corsOrigin,
@@ -87,6 +93,7 @@ app.use(cors({
     'X-Request-ID',
     'Retry-After',
   ],
+  credentials: true,
 }));
 app.use(express.json({ limit: '100kb' }));
 
