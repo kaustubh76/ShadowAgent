@@ -262,6 +262,17 @@ const server = app.listen(Number(PORT), '0.0.0.0', async () => {
     }
   }
 
+  // Seed demo data (ratings, sessions, disputes, refunds, policies, multi-sig)
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const { seedDemoData } = await import('./seedData');
+      await seedDemoData(Number(PORT));
+      logger.info('Demo data seeded (ratings, sessions, disputes, refunds, policies)');
+    } catch (err) {
+      logger.warn('Demo data seeding failed (non-critical):', err);
+    }
+  }
+
   // Print startup readiness summary
   const redisStatus = redis.isConnected() ? 'connected' : 'in-memory fallback';
   const cachedCount = indexerService.getStats().cachedAgents;
