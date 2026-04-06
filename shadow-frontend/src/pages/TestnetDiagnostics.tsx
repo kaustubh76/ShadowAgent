@@ -21,6 +21,7 @@ import {
 import { useShieldWallet } from '../providers/WalletProvider';
 import { useToast } from '../contexts/ToastContext';
 import { API_BASE } from '../config';
+import { fetchWithRetry } from '../lib/api';
 import FaucetWidget from '../components/FaucetWidget';
 import {
   getBalance,
@@ -334,7 +335,7 @@ export default function TestnetDiagnostics() {
     updateTest('facilitator', { status: 'running', details: [], error: undefined });
 
     try {
-      const resp = await fetch(`${API_BASE}/health`);
+      const resp = await fetchWithRetry(`${API_BASE}/health`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
 
