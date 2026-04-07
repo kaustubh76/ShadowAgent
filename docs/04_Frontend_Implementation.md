@@ -735,6 +735,38 @@ All form components now show user-facing error messages on submission failure:
 
 - `RATING_BURN_AMOUNT = 0.5` removed from `constants/ui.ts` (duplicate of `RATING_BURN_COST` in `services/aleo.ts`)
 
+### MarketplaceActivity Component (HomePage)
+
+New component on the HomePage that shows live marketplace stats **without requiring wallet connection**:
+
+```typescript
+function MarketplaceActivity() {
+  // Fetches from: searchAgents, fetchJobs, listSessions, fetchDisputes
+  // Displays: Registered Agents, Active Jobs, Payment Sessions, Disputes Filed
+}
+```
+
+Renders above the SystemStatus section. Uses `TrendingUp` icon with "Live Marketplace" heading.
+
+### Production Environment (`.env.production`)
+
+```
+VITE_FACILITATOR_URL=https://shadowagent-facilitator.onrender.com
+VITE_API_URL=https://shadowagent-facilitator.onrender.com
+```
+
+Used by `vite build` for production bundles deployed to Vercel.
+
+### TestnetDiagnostics Improvements
+
+- **Transfer timeout**: Increased from 12 to 60 attempts (60s → 300s / 5 min) to handle slow Aleo testnet confirmations
+- **Health check**: Uses `fetchWithRetry` instead of raw `fetch` to handle Render connection drops
+- **Timeout UX**: On timeout, shows "Pending (tx submitted successfully)" with note to check explorer — not an error, since the transaction WAS submitted on-chain
+
+### Star Rating Accessibility
+
+Rating selector uses `role="radiogroup"` with individual `role="radio"` buttons. Supports keyboard navigation (Arrow keys) and `focus-visible:ring` styles.
+
 ---
 
 *End of Frontend Implementation Guide*

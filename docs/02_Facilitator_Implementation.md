@@ -1439,6 +1439,53 @@ All `.catch(() => {})` patterns have been replaced with error-logging catches:
 - `indexerService.onAgentRegistered` in agents route
 - `redis.reset` in rate limiter
 
+### CORS & Helmet Configuration (April 2026)
+
+Helmet is configured to allow cross-origin requests from the Vercel frontend:
+
+```typescript
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginOpenerPolicy: false,
+}));
+
+app.use(cors({
+  origin: true,        // Reflects request origin (works with any frontend)
+  credentials: true,   // Allow cookies/auth headers
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+}));
+```
+
+When `CORS_ORIGIN` env var is set, it restricts to those origins only.
+
+### Demo Data Seeding (`seedData.ts`)
+
+On every startup, the facilitator seeds realistic demo data via API calls to itself:
+
+- **30 ratings** across 6 agents (avg 3.8–4.7 stars)
+- **4 sessions** (2 active, 1 closed, 1 paused) with spending history
+- **3 disputes** (opened, agent_responded, resolved_split)
+- **2 refund proposals** (proposed, accepted)
+- **2 spending policies** (small budget, enterprise)
+- **1 multi-sig escrow** (25cr, 2-of-3, 1 approval)
+
+Control via environment variable:
+- `SKIP_DEMO_SEED=true` — disable demo data seeding
+- Default: seeds on every restart (in-memory stores are empty on boot)
+
+### Production Environment Fallback
+
+Config loads `.env.production` as fallback when `.env` is gitignored (Render deployment):
+
+```typescript
+dotenv.config();
+if (existsSync('.env.production')) {
+  dotenv.config({ path: '.env.production', override: false });
+}
+```
+
+The `.env.production` file includes `CORS_ORIGIN`, `SEED_AGENTS`, and `SEED_JOBS` for Render.
+
 ---
 
 *End of Facilitator Implementation Guide*

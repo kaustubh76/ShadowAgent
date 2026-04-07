@@ -784,25 +784,20 @@ export async function waitForTransaction(
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const tx = await networkClient.getTransaction(txId) as any;
-      if (tx && tx.status === 'accepted') {
-        return {
-          confirmed: true,
-          blockHeight: tx.block?.height,
-        };
-      }
-      if (tx && tx.status === 'rejected') {
-        return {
-          confirmed: false,
-          error: 'Transaction rejected',
-        };
-      }
-      // If tx exists but no status, assume it's confirmed (different API versions)
-      if (tx && tx.transaction_id) {
-        return {
-          confirmed: true,
-          blockHeight: tx.index,
-        };
+      const tx = await networkClient.getTransaction(txId) as unknown as Record<string, unknown> | null;
+      if (tx) {
+        const status = tx.status as string | undefined;
+        if (status === 'accepted') {
+          const block = tx.block as Record<string, unknown> | undefined;
+          return { confirmed: true, blockHeight: block?.height as number | undefined };
+        }
+        if (status === 'rejected') {
+          return { confirmed: false, error: 'Transaction rejected' };
+        }
+        // If tx exists but no status, assume confirmed (different API versions)
+        if (tx.transaction_id) {
+          return { confirmed: true, blockHeight: tx.index as number | undefined };
+        }
       }
     } catch {
       // Transaction not found yet, continue polling

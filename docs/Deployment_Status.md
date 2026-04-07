@@ -146,3 +146,45 @@
 | **Frontend** (React/Vite) | Dev server + production build | 80 unit tests passing |
 
 > Last verified: April 2026. All 254 unit tests passing. Zero TypeScript errors across all packages.
+
+## Production Deployment (Vercel + Render)
+
+| Component | Platform | URL |
+|-----------|----------|-----|
+| **Frontend** | Vercel | `https://shadowagent-five.vercel.app` |
+| **Facilitator** | Render | `https://shadowagent-facilitator.onrender.com` |
+
+### Vercel Environment Variables
+
+| Variable | Value |
+|----------|-------|
+| `VITE_FACILITATOR_URL` | `https://shadowagent-facilitator.onrender.com` |
+| `VITE_API_URL` | `https://shadowagent-facilitator.onrender.com` |
+
+### Render Environment Variables
+
+| Variable | Value |
+|----------|-------|
+| `CORS_ORIGIN` | `https://shadowagent-five.vercel.app` |
+| `NODE_ENV` | `production` |
+| `SEED_AGENTS` | 8 agents (set in `.env.production`) |
+| `SEED_JOBS` | 6 jobs (set in `.env.production`) |
+
+### Auto-Seeded Data (on every Render restart)
+
+| Data | Count |
+|------|-------|
+| Agents | 8 (NLP, Vision, Code, Data, Audio, Multi, Custom) |
+| Ratings | 30 across 6 agents |
+| Jobs | 6 (in_progress, open, completed, cancelled) |
+| Sessions | 4 (active, paused, closed) |
+| Disputes | 3 (opened, responded, resolved) |
+| Refunds | 2 (proposed, accepted) |
+| Policies | 2 (small budget, enterprise) |
+| Multi-sig | 1 (25cr, 2-of-3) |
+
+Set `SKIP_DEMO_SEED=true` on Render to disable demo data seeding.
+
+### CORS Configuration
+
+Helmet configured with `crossOriginResourcePolicy: 'cross-origin'` to allow Vercel→Render cross-origin requests. CORS reflects the request origin with `credentials: true`.
