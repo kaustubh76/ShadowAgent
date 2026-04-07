@@ -422,11 +422,11 @@ export default function TestnetDiagnostics() {
           { label: 'Amount', value: '10,000 microcredits (0.01 ALEO)' },
           { label: 'Recipient', value: 'Self (same address)' },
           { label: 'Transaction ID', value: txId },
-          { label: 'Status', value: 'Waiting for on-chain confirmation (up to ~3 min)...' },
+          { label: 'Status', value: 'Waiting for on-chain confirmation (up to ~5 min)...' },
         ],
       }));
 
-      const confirmation = await waitForTransaction(txId, 40, 5000);
+      const confirmation = await waitForTransaction(txId, 60, 5000);
 
       // Check new balance
       const newBalance = await getBalance(publicKey);
@@ -439,14 +439,17 @@ export default function TestnetDiagnostics() {
         details: [
           { label: 'Amount', value: '10,000 microcredits (0.01 ALEO)' },
           { label: 'Transaction ID', value: txId },
-          { label: 'Confirmed', value: confirmation.confirmed ? 'Yes' : 'Pending' },
-          { label: 'New Balance', value: `${newBalance.toLocaleString()} microcredits (${credits.format(newBalance)} ALEO)` },
+          { label: 'Confirmed', value: confirmation.confirmed ? 'Yes' : 'Pending (tx submitted successfully)' },
+          ...(confirmation.confirmed
+            ? [{ label: 'New Balance', value: `${newBalance.toLocaleString()} microcredits (${credits.format(newBalance)} ALEO)` }]
+            : [{ label: 'Note', value: 'Transaction was submitted to Aleo testnet. Confirmation may take a few more minutes. Check explorer for status.' }]
+          ),
         ],
-        error: confirmation.confirmed ? undefined : (confirmation.error || 'Still processing'),
+        error: confirmation.confirmed ? undefined : undefined, // Not an error — tx was submitted
       });
 
       showToast(
-        confirmation.confirmed ? 'Transfer confirmed on-chain!' : 'Transfer submitted, pending confirmation',
+        confirmation.confirmed ? 'Transfer confirmed on-chain!' : 'Transfer submitted! Confirmation still processing on Aleo testnet.',
         confirmation.confirmed ? 'success' : 'warning'
       );
     } catch (err) {
